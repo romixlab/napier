@@ -14,6 +14,9 @@ follow [Semantic Versioning](https://semver.org/). Feature IDs refer to [FEATURE
   (UNIT-9).
 - `Quantity::value_f64`, `as_f64`, `to_si_f64`, exact `base_decimal` and `base_i64` (NUM-5).
 - `Prefix::exp10`, `from_exp10`, `as_f64`; `Error::Registry`; `std::error::Error` for `Error`.
+- Unit expressions: `10 V/us`, `1 m/s²`, `ppm/°C`, `W/(m·K)`, `(m/s)^2` parse into `UnitExpr`; `·` (U+00B7)
+  multiplies besides `*` and `⋅` (EXPR-1, EXPR-2).
+- `Ω` as U+2126 and `℃` (U+2103) are read as `Ω` and `°C`; `m°C` is milli + °C (UNIT-13).
 
 ### Changed
 
@@ -28,6 +31,8 @@ follow [Semantic Versioning](https://semver.org/). Feature IDs refer to [FEATURE
   exponent, so `1 km^2` gives 1e6 (was 1000) (NUM-3).
 - **Breaking:** `°C` has an affine scale: `25 °C` is 298.15 K in coherent SI (UNIT-7).
 - **Breaking:** `Error` is `#[non_exhaustive]`, `Error::Pest` is boxed.
+- A whole known unit wins over a prefix split: registered words like `ppb` and `rpm` are the unit (`ppb` was pico +
+  `pb`); `k%` and `kppm` are errors (UNIT-12).
 
 ### Removed
 
@@ -37,6 +42,9 @@ follow [Semantic Versioning](https://semver.org/). Feature IDs refer to [FEATURE
 ### Fixed
 
 - Superscript exponents (`m²`, `s⁻¹`) failed to parse (UNIT-3).
+- `100 mΩ` and other prefixes before `Ω` failed to parse; `10 µ` failed while `10 u` parsed (UNIT-13).
+- `1e3` without unit failed to parse (NUM-4).
+- `OhmF32::parse` failed on exponents: `1e3`, `1.5e3`, `2e-3` (RES-2).
 
 ## [0.2.0] - 2026-10-07
 

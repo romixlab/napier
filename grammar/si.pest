@@ -1,91 +1,24 @@
-// Base units
-second = { !("s" ~ ident) ~ "s" }
-meter = { !("m" ~ ident) ~ "m" }
-gram = { !("g" ~ ident) ~ "g" }
-ampere = { !("A" ~ ident) ~ "A" }
-kelvin = { !("K" ~ ident) ~ "K" }
-mole = { !("mol" ~ ident) ~ "mol" }
-candela = { !("cd" ~ ident) ~ "cd" }
-
-// Derived units
-radian = { !("rad" ~ ident) ~ "rad" }
-steradian = { !("sr" ~ ident) ~ "sr" }
-hertz = { !("Hz" ~ ident) ~ "Hz" }
-newton = { !("N" ~ ident) ~ "N" }
-pascal = { !("Pa" ~ ident) ~ "Pa" }
-joule = { !("J" ~ ident) ~ "J" }
-watt = { !("W" ~ ident) ~ "W" }
-coulomb = { !("C" ~ ident) ~ "C" }
-volt = { !("V" ~ ident) ~ "V" }
-farad = { !("F" ~ ident) ~ "F" }
-ohm = { !("Ω" ~ ident) ~ "Ω" }
-siemens = { !("S" ~ ident) ~ "S" }
-weber = { !("Wb" ~ ident) ~ "Wb" }
-tesla = { !("T" ~ ident) ~ "T" }
-henry = { !("H" ~ ident) ~ "H" }
-celsius = { "°C" } // can only be used standalone though?
-lumen = { !("lm" ~ ident) ~ "lm" }
-lux = { !("lx" ~ ident) ~ "lx" }
-becquerel = { !("Bq" ~ ident) ~ "Bq" }
-gray = { !("Gy" ~ ident) ~ "Gy" }
-sievert = { !("Sv" ~ ident) ~ "Sv" }
-katal = { !("kat" ~ ident) ~ "kat" }
-
-// Units and numbers
-raw_unit = {
-    second | meter | gram | ampere | kelvin | mole | candela |
-    radian | steradian | hertz | newton | pascal | joule | watt | coulomb | volt | farad | ohm |
-    siemens | weber | tesla | henry | celsius | lumen | lux | becquerel | gray | sievert | katal | ident
-}
-// Ratios: % is centi, ‰ milli, ppm micro (tried before a prefix, or ppm would be pico + pm)
-ratio_unit = { "%" | "‰" | ("ppm" ~ !ASCII_ALPHANUMERIC) }
-unit = { (ratio_unit | (prefix? ~ raw_unit)) ~ (("^" ~ integer_number) | ss_number)? }
-unit_only = { SOI ~ silent_space? ~ unit ~ silent_space? ~ EOI }
-term = { unit | number }
-unit_expr = { paren | (term ~ silent_space? ~ (verb ~ silent_space? ~ unit_expr)*) }
-si_expr = { SOI ~ silent_space? ~ (&(number ~ silent_space? ~ unit) ~ number)? ~ silent_space? ~ unit_expr ~ silent_space? ~ EOI }
-paren = { "(" ~ silent_space ~ unit_expr ~ silent_space ~ ")" }
-// binary_op = { unit_expr ~ verb ~ unit_expr }
+// Units: a word, resolved in Rust (parse::resolve_word): a whole known unit wins (`Pa`, `cd`, `ppm`, registered
+// words), else a prefix symbol and a known unit (`kPa`, `mΩ`, `µF`), else an unknown word.
+word_char = _{ ASCII_ALPHA | "\u{03A9}" | "\u{2126}" | "\u{00B5}" | "\u{03BC}" | "°" | "\u{2103}" }
+word = { "%" | "‰" | (word_char ~ (word_char | ASCII_DIGIT)*) }
+unit = { word ~ (("^" ~ integer_number) | ss_number)? }
+group = { "(" ~ silent_space ~ unit_expr ~ silent_space ~ ")" ~ (("^" ~ integer_number) | ss_number)? }
+// Left associative: `a/b·c` is `(a/b)·c`.
+unit_expr = { (unit | group) ~ (silent_space ~ verb ~ silent_space ~ (unit | group))* }
+unit_only = { SOI ~ silent_space ~ unit_expr ~ silent_space ~ EOI }
 verb = { mul | div }
 
-si_number = { SOI ~ silent_space? ~ number ~ silent_space? ~ unit? ~ silent_space? ~ EOI }
+si_number = { SOI ~ silent_space ~ number ~ silent_space ~ (mul ~ silent_space)? ~ unit_expr? ~ silent_space ~ EOI }
 
-// Prefixes
-prefix = {
-    deca | deci | hecto | centi | kilo | milli | mega | micro | giga | nano | tera | pico | peta | femto |
-    exa | atto | zetta | zepto | yotta | yocto | ronna | ronto | quetta | quecto
-}
-quetta = { &("Q" ~ ident) ~ "Q" } // 30
-ronna = { &("R" ~ ident) ~ "R" } // 27
-yotta = { &("Y" ~ ident) ~ "Y" } // 24
-zetta = { &("Z" ~ ident) ~ "Z" } // 21
-exa = { &("E" ~ ident) ~ "E" } // 18
-peta = { &("P" ~ ident) ~ "P" } // 15
-tera = { &("T" ~ ident) ~ "T" } // 12
+// Prefixes in resistor notation (`4k7`); in units they are split off in Rust.
 tera_unconditional = { "T" } // 12
-giga = { &("G" ~ ident) ~ "G" } // 9
 giga_unconditional = { "G" } // 9
-mega = { &("M" ~ ident) ~ "M" } // 6
 mega_unconditional = { "M" } // 6
-kilo = { &(("k" | "K") ~ ident) ~ ("k" | "K") } // 3
 kilo_unconditional = { "k" | "K" } // 3
-hecto = { &("h" ~ ident) ~ "h" } // 2
-deca = { &("da" ~ ident) ~ "da" } // 1
-deci = { &("d" ~ ident) ~ "d" } // -1
-centi = { &("c" ~ ident) ~ "c" } // -2
-milli = { (&("m" ~ ident) ~ "m") } // -3
 milli_unconditional = { "m" }
-micro = { &(("u" | "μ" | "µ") ~ ident) ~ "u" | "μ" | "µ" } // -6, U+03BC or U+00B5
-micro_unconditional = { "u" | "μ" | "µ" } // -6
-nano = { &("n" ~ ident) ~ "n" } // -9
+micro_unconditional = { "u" | "\u{03BC}" | "\u{00B5}" } // -6
 nano_unconditional = { "n" } // -9
-pico = { &("p" ~ ident) ~ "p" } // -12
-femto = { &("f" ~ ident) ~ "f" } // -15
-atto = { &("a" ~ ident) ~ "a" } // -18
-zepto = { &("z" ~ ident) ~ "z" } // -21
-yocto = { &("y" ~ ident) ~ "y" } // -24
-ronto = { &("r" ~ ident) ~ "r" } // -27
-quecto = { &("q" ~ ident) ~ "q" } // -30
 
 // Number
 number = { integer_number ~ (exponent | ("." ~ raw_number ~ exponent?) )? }
@@ -95,11 +28,11 @@ minus = { "-" | "\u{2212}" }
 exponent = { "e" ~ integer_number }
 
 // Operators
-mul = { "*" | "\u{22C5}" }
+mul = { "*" | "\u{22C5}" | "\u{00B7}" }
 div = { "/" }
 
 // Special cases
-ohm_or_r = { "Ω" | "R" | "r" | "Ohms" | "Ohm" }
+ohm_or_r = { "Ω" | "\u{2126}" | "R" | "r" | "Ohms" | "Ohm" }
 ohm_unit = { (r_prefix? ~ ohm_or_r) | r_prefix | ohm_or_r }
 r_prefix = {
     kilo_unconditional | milli_unconditional | mega_unconditional |
@@ -123,10 +56,5 @@ ss_eight = { "\u{2078}" }
 ss_nine = { "\u{2079}" }
 ss_minus = { "\u{207B}" }
 
-// Misc
-ident = { ASCII_ALPHA ~ ASCII_ALPHANUMERIC* }
-dot = _{ "." }
-
-// WHITESPACE manual whitespace management
-space = { " "+ } // warning if more than one space is used
+// Manual whitespace management
 silent_space = _{ " "* }

@@ -20,9 +20,9 @@ pub(crate) fn quantity(s: &str, units: &Registry) -> Result<Quantity, Error> {
         .ok_or(expected_rule("si_number"))?
         .into_inner();
     let number = p.next().ok_or(expected_rule("number"))?.as_str();
-    let unit = match p.next() {
-        Some(unit) if unit.as_rule() == Rule::unit => UnitExpr::Unit(parse_unit(unit, units)?),
-        _ => UnitExpr::one(),
+    let unit = match p.find(|p| p.as_rule() == Rule::unit_expr) {
+        Some(e) => parse_unit_expr(e, units)?,
+        None => UnitExpr::one(),
     };
     Ok(Quantity {
         number: number.to_string(),
@@ -31,13 +31,51 @@ pub(crate) fn quantity(s: &str, units: &Registry) -> Result<Quantity, Error> {
 }
 
 pub(crate) fn unit_expr(s: &str, units: &Registry) -> Result<UnitExpr, Error> {
-    let unit = SIParser::parse(Rule::unit_only, s)?
+    let e = SIParser::parse(Rule::unit_only, s)?
         .next()
         .ok_or(expected_rule("unit_only"))?
         .into_inner()
         .next()
-        .ok_or(expected_rule("unit"))?;
-    Ok(UnitExpr::Unit(parse_unit(unit, units)?))
+        .ok_or(expected_rule("unit_expr"))?;
+    parse_unit_expr(e, units)
+}
+
+/// `a / b · c` from left to right: `(a / b) · c`.
+fn parse_unit_expr(p: Pair<Rule>, units: &Registry) -> Result<UnitExpr, Error> {
+    if p.as_rule() != Rule::unit_expr {
+        return Err(expected_rule("unit_expr"));
+    }
+    let mut p = p.into_inner();
+    let mut e = parse_operand(p.next().ok_or(expected_rule("unit"))?, units)?;
+    while let Some(verb) = p.next() {
+        let rhs = parse_operand(p.next().ok_or(expected_rule("unit"))?, units)?;
+        let is_div = verb.into_inner().next().map(|v| v.as_rule()) == Some(Rule::div);
+        e = if is_div { e / rhs } else { e * rhs };
+    }
+    Ok(e)
+}
+
+fn parse_operand(p: Pair<Rule>, units: &Registry) -> Result<UnitExpr, Error> {
+    match p.as_rule() {
+        Rule::unit => Ok(UnitExpr::Unit(parse_unit(p, units)?)),
+        Rule::group => {
+            let mut p = p.into_inner();
+            let e = parse_unit_expr(p.next().ok_or(expected_rule("unit_expr"))?, units)?;
+            Ok(match p.next() {
+                Some(n) => e.pow(parse_exponent(n)?),
+                None => e,
+            })
+        }
+        _ => Err(expected_rule("unit or group")),
+    }
+}
+
+fn parse_exponent(p: Pair<Rule>) -> Result<i8, Error> {
+    let exp = match p.as_rule() {
+        Rule::ss_number => parse_superscript(p.as_str())?,
+        _ => parse_integer_number_i64(p)?,
+    };
+    i8::try_from(exp).map_err(|_| Error::Internal("unit exponent must fit in i8".into()))
 }
 
 fn parse_unit(p: Pair<Rule>, units: &Registry) -> Result<Unit, Error> {
@@ -45,36 +83,75 @@ fn parse_unit(p: Pair<Rule>, units: &Registry) -> Result<Unit, Error> {
         return Err(expected_rule("unit"));
     }
     let mut p = p.into_inner();
-    let first = p.next().ok_or(expected_rule("prefix or unit"))?;
-    let mut unit = match first.as_rule() {
-        Rule::ratio_unit => units
-            .lookup(first.as_str())
-            .ok_or(expected_rule("ratio_unit"))?,
-        Rule::prefix => {
-            let prefix = parse_prefix(first)?;
-            let raw_unit = p.next().ok_or(expected_rule("raw_unit"))?;
-            let unit = parse_raw_unit(raw_unit, units)?;
-            if unit.prefix != Prefix::Unit {
-                return Err(Error::Internal(format!(
-                    "{unit} has a prefix of its own, {prefix} can't be added"
-                )));
-            }
-            Unit { prefix, ..unit }
-        }
-        _ => parse_raw_unit(first, units)?,
-    };
+    let word = p.next().ok_or(expected_rule("word"))?.as_str();
+    let mut unit = resolve_word(word, units)?;
     if let Some(num) = p.next() {
-        let exp = match num.as_rule() {
-            Rule::ss_number => parse_superscript(num.as_str())?,
-            _ => parse_integer_number_i64(num)?,
-        };
-        let exp = i8::try_from(exp)
-            .ok()
-            .and_then(|e| e.checked_mul(unit.exp))
+        unit.exp = parse_exponent(num)?
+            .checked_mul(unit.exp)
             .ok_or(Error::Internal("unit exponent must fit in i8".into()))?;
-        unit.exp = exp;
     }
     Ok(unit)
+}
+
+/// Prefix symbols, `da` before `d`.
+const PREFIXES: [(&str, Prefix); 27] = [
+    ("da", Prefix::Deca),
+    ("Q", Prefix::Quetta),
+    ("R", Prefix::Ronna),
+    ("Y", Prefix::Yotta),
+    ("Z", Prefix::Zetta),
+    ("E", Prefix::Exa),
+    ("P", Prefix::Peta),
+    ("T", Prefix::Tera),
+    ("G", Prefix::Giga),
+    ("M", Prefix::Mega),
+    ("k", Prefix::Kilo),
+    ("K", Prefix::Kilo),
+    ("h", Prefix::Hecto),
+    ("d", Prefix::Deci),
+    ("c", Prefix::Centi),
+    ("m", Prefix::Milli),
+    ("u", Prefix::Micro),
+    ("\u{00B5}", Prefix::Micro),
+    ("\u{03BC}", Prefix::Micro),
+    ("n", Prefix::Nano),
+    ("p", Prefix::Pico),
+    ("f", Prefix::Femto),
+    ("a", Prefix::Atto),
+    ("z", Prefix::Zepto),
+    ("y", Prefix::Yocto),
+    ("r", Prefix::Ronto),
+    ("q", Prefix::Quecto),
+];
+
+/// The unit a word stands for: a whole known unit (`Pa`, `cd`, `ppm`, a registered word) wins over a prefix split
+/// (UNIT-12); else a prefix and a known unit (`kPa`, `mΩ`, `µF`, `krpm`, UNIT-13); else, as before 0.3, a prefix and
+/// an unknown ASCII word (`mVDC` is milli + `VDC`), or the whole word unknown.
+fn resolve_word(word: &str, units: &Registry) -> Result<Unit, Error> {
+    let word = word.replace('\u{2126}', "Ω").replace('\u{2103}', "°C");
+    if let Some(unit) = units.lookup(&word) {
+        return Ok(unit);
+    }
+    let split = PREFIXES
+        .iter()
+        .find_map(|(sym, prefix)| Some((*prefix, word.strip_prefix(sym)?)))
+        .filter(|(_, rest)| !rest.is_empty());
+    let Some((prefix, rest)) = split else {
+        return Ok(Unit::base(BaseUnit::Unknown(word)));
+    };
+    if let Some(unit) = units.lookup(rest) {
+        if unit.prefix != Prefix::Unit || unit.base == BaseUnit::Ratio || unit.exp != 1 {
+            return Err(Error::Internal(format!(
+                "{rest} takes no prefix, {word} is not a unit"
+            )));
+        }
+        return Ok(Unit { prefix, ..unit });
+    }
+    if rest.starts_with(|c: char| c.is_ascii_alphabetic()) && rest.is_ascii() {
+        Ok(Unit::new(prefix, BaseUnit::Unknown(rest.to_string()), 1))
+    } else {
+        Ok(Unit::base(BaseUnit::Unknown(word)))
+    }
 }
 
 fn parse_superscript(s: &str) -> Result<i64, Error> {
@@ -101,20 +178,6 @@ fn parse_superscript(s: &str) -> Result<i64, Error> {
     Ok(if minus { -v } else { v })
 }
 
-fn parse_raw_unit(p: Pair<Rule>, units: &Registry) -> Result<Unit, Error> {
-    if p.as_rule() != Rule::raw_unit {
-        return Err(expected_rule("raw_unit"));
-    }
-    let raw_unit = p.into_inner().next().ok_or(expected_rule("raw_unit"))?;
-    let word = raw_unit.as_str();
-    Ok(match raw_unit.as_rule() {
-        Rule::ident => units
-            .lookup(word)
-            .unwrap_or_else(|| Unit::base(BaseUnit::Unknown(word.to_string()))),
-        _ => units.lookup(word).ok_or(expected_rule("raw_unit"))?,
-    })
-}
-
 pub(crate) fn parse_integer_number_i64(rule: Pair<Rule>) -> Result<i64, Error> {
     if rule.as_rule() != Rule::integer_number {
         return Err(expected_rule("integer_number"));
@@ -131,33 +194,17 @@ pub(crate) fn parse_integer_number_i64(rule: Pair<Rule>) -> Result<i64, Error> {
     Ok(if is_minus { -v } else { v })
 }
 
+/// A prefix of resistor notation (`4k7`).
 pub(crate) fn parse_prefix(rule: Pair<Rule>) -> Result<Prefix, Error> {
     let rule = rule.into_inner().next().ok_or(expected_rule("prefix"))?;
     let prefix = match rule.as_rule() {
-        Rule::quetta => Prefix::Quetta,
-        Rule::ronna => Prefix::Ronna,
-        Rule::yotta => Prefix::Yotta,
-        Rule::zetta => Prefix::Zetta,
-        Rule::exa => Prefix::Exa,
-        Rule::peta => Prefix::Peta,
-        Rule::tera | Rule::tera_unconditional => Prefix::Tera,
-        Rule::giga | Rule::giga_unconditional => Prefix::Giga,
-        Rule::mega | Rule::mega_unconditional => Prefix::Mega,
-        Rule::kilo | Rule::kilo_unconditional => Prefix::Kilo,
-        Rule::hecto => Prefix::Hecto,
-        Rule::deca => Prefix::Deca,
-        Rule::deci => Prefix::Deci,
-        Rule::centi => Prefix::Centi,
-        Rule::milli | Rule::milli_unconditional => Prefix::Milli,
-        Rule::micro | Rule::micro_unconditional => Prefix::Micro,
-        Rule::nano | Rule::nano_unconditional => Prefix::Nano,
-        Rule::pico => Prefix::Pico,
-        Rule::femto => Prefix::Femto,
-        Rule::atto => Prefix::Atto,
-        Rule::zepto => Prefix::Zepto,
-        Rule::yocto => Prefix::Yocto,
-        Rule::ronto => Prefix::Ronto,
-        Rule::quecto => Prefix::Quecto,
+        Rule::tera_unconditional => Prefix::Tera,
+        Rule::giga_unconditional => Prefix::Giga,
+        Rule::mega_unconditional => Prefix::Mega,
+        Rule::kilo_unconditional => Prefix::Kilo,
+        Rule::milli_unconditional => Prefix::Milli,
+        Rule::micro_unconditional => Prefix::Micro,
+        Rule::nano_unconditional => Prefix::Nano,
         _ => return Err(expected_rule("prefix")),
     };
     Ok(prefix)

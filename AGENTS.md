@@ -41,14 +41,15 @@ The tpm repo's `/sync-repos` reads this file to log progress, so a missing entry
 
 One crate.
 
-- `grammar/si.pest` — the pest grammar: units, prefixes, numbers, superscripts, the special resistance syntax.
-  Prefix rules use look-ahead (`&("k" ~ ident)`) so `m` alone is meter and `mV` is milli-volt; the
-  `*_unconditional` variants are for resistance (`4k7`).
+- `grammar/si.pest` — the pest grammar: numbers, unit words, expressions (`m/s²`, `W/(m·K)`), superscripts, the
+  special resistance syntax (`4k7`, the `*_unconditional` prefixes). A unit word is resolved in Rust
+  (`parse::resolve_word`): a whole known unit wins (`Pa`, `cd`, `m`), then a prefix plus a known unit (`kPa`, `mΩ`),
+  then the old split for unknown words (`mVDC` is milli + `VDC`).
 - `src/dim.rs` — `Dim` (SI base-unit exponents, ww_si's order) and `Scale` (how a unit becomes coherent SI).
 - `src/unit.rs` — `Prefix`, `BaseUnit` (SI base and derived units, `Ratio`, registered `Named`, `Unknown` words),
   `Unit` (prefix, base, exponent), `UnitExpr` (products, quotients, powers).
 - `src/registry.rs` — `Registry` and `NamedUnit`: units and spellings known at run time.
-- `src/parse.rs` — from the pest tree to `Quantity` and `UnitExpr`.
+- `src/parse.rs` — from the pest tree to `Quantity` and `UnitExpr`, word resolution and prefix splitting.
 - `src/lib.rs` — `Quantity`, `OhmF32::parse`, `Error`, tests at the bottom.
 
 The model follows ww_si (`~/git/wire_weaver/ww_stdlib/ww_si`): same `Dim` order and `Scale` semantics. Nothing about
@@ -74,7 +75,7 @@ Before declaring a change done: build, clippy without warnings, fmt, tests, and 
 - Parse errors are `Error` values, never panics: no `unwrap`/`expect` on input-derived data, no `println!` left in
   library code.
 - A new accepted spelling goes into the grammar and a test in the same commit. Check it doesn't change how an
-  existing input parses (prefix look-ahead makes this easy to break: `m`, `T`, `G`, `R`).
+  existing input parses (the prefix split in `resolve_word` makes this easy to break: `m`, `T`, `G`, `R`, `cd`, `Pa`).
 - Don't lose precision silently: keep the number text in `Quantity`, convert at the edge.
 
 ## Tests

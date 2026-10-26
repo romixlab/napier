@@ -13,7 +13,7 @@ pub use dim::{Dim, Scale};
 pub use registry::{NamedUnit, Registry};
 pub use unit::{BaseUnit, KNOWN_UNITS, Prefix, Unit, UnitExpr};
 
-use parse::{Rule, SIParser, expected_rule, parse_integer_number_i64, parse_prefix};
+use parse::{Rule, SIParser, expected_rule, parse_prefix};
 use pest::Parser;
 use pest::iterators::Pair;
 use serde::{Deserialize, Serialize};
@@ -119,7 +119,6 @@ impl std::error::Error for Error {}
 impl OhmF32 {
     pub fn parse(s: impl AsRef<str>) -> Result<OhmF32, Error> {
         let p = SIParser::parse(Rule::resistance, s.as_ref())?;
-        // println!("{p:#?}");
         let mut resistance = p
             .into_iter()
             .next()
@@ -149,50 +148,28 @@ impl OhmF32 {
     }
 }
 
+/// `1.5e3`, or resistor notation with the prefix as the decimal point (`4k7` is 4.7 kilo), read as decimal text
+/// and shifted exactly before the one conversion to `f32` (RES-2).
 fn parse_any_number_f32(num: Pair<Rule>) -> Result<f32, Error> {
     if !matches!(num.as_rule(), Rule::number | Rule::r_number) {
         return Err(Error::Internal(
             "expected number or number_prefix_allowed".into(),
         ));
     }
+    let text = num.as_str();
     let mut p = num.into_inner();
-    let int = parse_integer_number_i64(p.next().ok_or(expected_rule("integer_number"))?)?;
-    let Some(tail) = p.next() else {
-        return Ok(int as f32);
+    let int = p.next().ok_or(expected_rule("integer_number"))?.as_str();
+    let (decimal, exp10) = match p.next() {
+        Some(prefix) if prefix.as_rule() == Rule::r_prefix => {
+            let exp10 = parse_prefix(prefix)?.exp10() as i32;
+            let frac = p.next().map(|f| f.as_str()).unwrap_or("0");
+            (format!("{int}.{frac}"), exp10)
+        }
+        _ => (text.to_string(), 0),
     };
-    match tail.as_rule() {
-        Rule::exponent => {
-            let exp = parse_integer_number_i64(p.next().ok_or(expected_rule("simple_number"))?)?;
-            let exp: u32 = exp
-                .try_into()
-                .map_err(|_| Error::Internal("exponent is too big".into()))?;
-            Ok(int as f32 * 10u64.pow(exp) as f32)
-        }
-        Rule::raw_number => {
-            let frac: f32 = format!("0.{}", tail.as_str()).parse()?;
-            let exp = if let Some(p) = p.next() {
-                let exp = parse_integer_number_i64(p)?;
-                let exp: u32 = exp
-                    .try_into()
-                    .map_err(|_| Error::Internal("exponent is too big".into()))?;
-                exp
-            } else {
-                0
-            };
-            Ok((int as f32 + frac) * 10u64.pow(exp) as f32)
-        }
-        Rule::prefix | Rule::r_prefix => {
-            let prefix = parse_prefix(tail)?;
-            let frac = if let Some(frac) = p.next() {
-                let frac: f32 = format!("0.{}", frac.as_str()).parse()?;
-                frac
-            } else {
-                0.0
-            };
-            Ok((int as f32 + frac) * prefix.as_f32())
-        }
-        _ => Err(Error::Internal("unexpected rule".into())),
-    }
+    let decimal = parse::shift_decimal(&decimal, exp10)
+        .ok_or_else(|| Error::Internal(format!("bad number {text:?}")))?;
+    Ok(decimal.parse()?)
 }
 
 #[cfg(test)]
@@ -432,7 +409,7 @@ mod tests {
         units.alias("Vdc", Unit::base(BaseUnit::Volt)).unwrap();
         units.alias("Ohms", Unit::base(BaseUnit::Ohm)).unwrap();
         units
-            .alias("bn", Unit::new(Prefix::Nano, BaseUnit::Ratio, 1))
+            .alias("ppb", Unit::new(Prefix::Nano, BaseUnit::Ratio, 1))
             .unwrap();
 
         let q = units.parse_quantity("2 kBd").unwrap();
@@ -449,9 +426,22 @@ mod tests {
 
         let q = units.parse_quantity("12Vdc").unwrap();
         assert_eq!(*unit_of(&q), Unit::base(BaseUnit::Volt));
-        let q = units.parse_quantity("3 bn").unwrap();
+        let q = units.parse_quantity("3 ppb").unwrap();
         assert_eq!(q.as_f64().unwrap(), 3e-9);
-        assert!(units.parse_quantity("3 kbn").is_err());
+        assert!(units.parse_quantity("3 kppb").is_err());
+        let rpm = units
+            .register(NamedUnit {
+                name: "revolutions per minute".into(),
+                symbol: "rpm".into(),
+                dim: Dim::new(-1, 0, 0, 0, 0, 0, 0),
+                scale: Scale::Factor(std::f64::consts::TAU / 60.0),
+                aliases: vec![],
+            })
+            .unwrap();
+        let q = units.parse_quantity("3000 rpm").unwrap();
+        assert_eq!(*unit_of(&q), Unit::base(rpm.clone()));
+        let q = units.parse_quantity("3 krpm").unwrap();
+        assert_eq!(*unit_of(&q), Unit::new(Prefix::Kilo, rpm, 1));
         let q = units.parse_quantity("12 kOhms").unwrap();
         assert_eq!(*unit_of(&q), Unit::new(Prefix::Kilo, BaseUnit::Ohm, 1));
         assert_eq!(units.parse_unit("kVdc").unwrap().to_string(), "kV");
@@ -474,6 +464,156 @@ mod tests {
             units.alias("baud", Unit::base(BaseUnit::Hertz)),
             Err(Error::Registry(_))
         ));
+    }
+
+    #[test]
+    fn whole_known_units_win_over_a_prefix_split() {
+        // UNIT-12
+        for (s, base) in [
+            ("1 Pa", BaseUnit::Pascal),
+            ("1 cd", BaseUnit::Candela),
+            ("1 mol", BaseUnit::Mole),
+            ("1 kat", BaseUnit::Katal),
+            ("1 rad", BaseUnit::Radian),
+            ("1 Gy", BaseUnit::Gray),
+            ("1 Hz", BaseUnit::Hertz),
+            ("1 T", BaseUnit::Tesla),
+            ("1 K", BaseUnit::Kelvin),
+            ("1 m", BaseUnit::Meter),
+        ] {
+            let q = Quantity::parse(s).unwrap();
+            assert_eq!(*unit_of(&q), Unit::base(base), "{s}");
+        }
+        for (s, prefix, base) in [
+            ("1 kPa", Prefix::Kilo, BaseUnit::Pascal),
+            ("1 mcd", Prefix::Milli, BaseUnit::Candela),
+            ("1 mmol", Prefix::Milli, BaseUnit::Mole),
+            ("1 dam", Prefix::Deca, BaseUnit::Meter),
+            ("1 dm", Prefix::Deci, BaseUnit::Meter),
+            ("1 Tm", Prefix::Tera, BaseUnit::Meter),
+            ("1 ms", Prefix::Milli, BaseUnit::Second),
+            ("1 Kg", Prefix::Kilo, BaseUnit::Gram),
+        ] {
+            let q = Quantity::parse(s).unwrap();
+            assert_eq!(*unit_of(&q), Unit::new(prefix, base, 1), "{s}");
+        }
+        // unknown words keep the old split
+        let q = Quantity::parse("10mVDC").unwrap();
+        assert_eq!(
+            *unit_of(&q),
+            Unit::new(Prefix::Milli, BaseUnit::Unknown("VDC".into()), 1)
+        );
+        let q = Quantity::parse("10 VDC").unwrap();
+        assert_eq!(unit_of(&q).base, BaseUnit::Unknown("VDC".into()));
+        // ratios take no further prefix
+        assert!(Quantity::parse("1 k%").is_err());
+        assert!(Quantity::parse("1 kppm").is_err());
+    }
+
+    #[test]
+    fn prefixes_before_non_ascii_units() {
+        // UNIT-13
+        for (s, prefix, base) in [
+            ("100 mΩ", Prefix::Milli, BaseUnit::Ohm),
+            ("4.7 kΩ", Prefix::Kilo, BaseUnit::Ohm),
+            ("4.7 k\u{2126}", Prefix::Kilo, BaseUnit::Ohm),
+            ("10 uΩ", Prefix::Micro, BaseUnit::Ohm),
+            ("10 \u{b5}Ω", Prefix::Micro, BaseUnit::Ohm),
+            ("10 \u{3bc}Ω", Prefix::Micro, BaseUnit::Ohm),
+            ("10 \u{b5}F", Prefix::Micro, BaseUnit::Farad),
+            ("10 \u{3bc}F", Prefix::Micro, BaseUnit::Farad),
+            ("5 m°C", Prefix::Milli, BaseUnit::DegreeCelsius),
+            ("25 \u{2103}", Prefix::Unit, BaseUnit::DegreeCelsius),
+        ] {
+            let q = Quantity::parse(s).unwrap();
+            assert_eq!(*unit_of(&q), Unit::new(prefix, base, 1), "{s}");
+        }
+        // the micro sign alone is a word like `u` alone, not a prefix without unit
+        let q = Quantity::parse("10 \u{b5}").unwrap();
+        assert_eq!(unit_of(&q).base, BaseUnit::Unknown("\u{b5}".into()));
+    }
+
+    #[test]
+    fn exponent_without_unit() {
+        // NUM-4
+        let q = Quantity::parse("1e3").unwrap();
+        assert_eq!(q.unit, UnitExpr::one());
+        assert_eq!(q.as_f64().unwrap(), 1000.0);
+        let q = Quantity::parse("2.5e-3").unwrap();
+        assert_eq!(q.base_decimal().unwrap(), "0.0025");
+    }
+
+    #[test]
+    fn unit_expressions() {
+        // EXPR-1, EXPR-2
+        let v = || UnitExpr::from(BaseUnit::Volt);
+        let us = Unit::new(Prefix::Micro, BaseUnit::Second, 1);
+        for s in ["10 V/us", "10V/us", "10*V/us", "10 V / us"] {
+            let q = Quantity::parse(s).unwrap();
+            assert_eq!(q.unit, v() / us.clone(), "{s}");
+            assert_eq!(q.number, "10");
+        }
+        let q = Quantity::parse("1 m/s²").unwrap();
+        assert_eq!(
+            q.unit,
+            UnitExpr::from(BaseUnit::Meter) / Unit::new(Prefix::Unit, BaseUnit::Second, 2)
+        );
+        assert_eq!(q.unit.dim(), Some(Dim::new(-2, 1, 0, 0, 0, 0, 0)));
+
+        let q = Quantity::parse("50 ppm/°C").unwrap();
+        assert_eq!(
+            q.unit,
+            UnitExpr::from(Unit::new(Prefix::Micro, BaseUnit::Ratio, 1)) / BaseUnit::DegreeCelsius
+        );
+
+        // left associative: a/b*c is (a/b)*c
+        let e = Registry::new().parse_unit("kg·m/s^2").unwrap();
+        let kg = Unit::new(Prefix::Kilo, BaseUnit::Gram, 1);
+        let s2 = Unit::new(Prefix::Unit, BaseUnit::Second, 2);
+        assert_eq!(e, UnitExpr::from(kg) * BaseUnit::Meter / s2);
+        assert_eq!(e.dim(), BaseUnit::Newton.dim());
+
+        let e = Registry::new().parse_unit("W/(m⋅K)").unwrap();
+        assert_eq!(
+            e,
+            UnitExpr::from(BaseUnit::Watt) / (UnitExpr::from(BaseUnit::Meter) * BaseUnit::Kelvin)
+        );
+        let e = Registry::new().parse_unit("(m/s)^2").unwrap();
+        assert_eq!(
+            e,
+            (UnitExpr::from(BaseUnit::Meter) / BaseUnit::Second).pow(2)
+        );
+        let e2 = Registry::new().parse_unit("(m/s)²").unwrap();
+        assert_eq!(e, e2);
+
+        // V/A has the dimension of Ω, and converts
+        let e = Registry::new().parse_unit("V/mA").unwrap();
+        assert_eq!(e.dim(), BaseUnit::Ohm.dim());
+        let k_ohm = UnitExpr::from(Unit::new(Prefix::Kilo, BaseUnit::Ohm, 1));
+        assert!(approx_eq!(
+            f64,
+            e.convert_f64(4.7, &k_ohm).unwrap(),
+            4.7,
+            ulps = 2
+        ));
+
+        // Display parses back to the same expression
+        for s in [
+            "kg·m/s^2",
+            "W/(m⋅K)",
+            "(m/s)^2",
+            "ppm/°C",
+            "mV/us",
+            "m^-1",
+            "(V/A)/(m/s)",
+        ] {
+            let e = Registry::new().parse_unit(s).unwrap();
+            assert_eq!(
+                Registry::new().parse_unit(&e.to_string()).unwrap(),
+                e,
+                "{s} -> {e}"
+            );
+        }
     }
 
     #[test]
@@ -534,5 +674,18 @@ mod tests {
 
         let v = OhmF32::parse("2 mOhms").unwrap();
         assert_eq!(v.0, 0.002);
+
+        let v = OhmF32::parse("4.7 k\u{2126}").unwrap();
+        assert_eq!(v.0, 4700.0);
+    }
+
+    #[test]
+    fn resistance_exponents() {
+        // RES-2
+        assert_eq!(OhmF32::parse("1e3").unwrap().0, 1000.0);
+        assert_eq!(OhmF32::parse("1.5e3").unwrap().0, 1500.0);
+        assert_eq!(OhmF32::parse("2e-3").unwrap().0, 0.002);
+        assert_eq!(OhmF32::parse("2.2e3 Ω").unwrap().0, 2200.0);
+        assert_eq!(OhmF32::parse("4k7").unwrap().0, 4700.0);
     }
 }
