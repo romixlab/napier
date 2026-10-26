@@ -5,6 +5,8 @@ follow [Semantic Versioning](https://semver.org/). Feature IDs refer to [FEATURE
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-26
+
 ### Added
 
 - Unit model after ww_si: `Dim`, `Scale` (`Coherent`, `Pow10`, `Factor`, `Affine`), compound `UnitExpr` (`Unit`,
