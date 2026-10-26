@@ -29,35 +29,45 @@ Last full review: 3 Oct 2026 (commit `b14b5aa`, 0.1.0). Built from the code and 
 
 ## Units and prefixes (`UNIT`)
 
-- ✅ **UNIT-1 SI base and derived units**: the 7 base units and 22 derived ones (`BaseUnit`, `KNOWN_UNITS`), each
-  with `name()`, `symbol()` and dimension vector `exp()` (`SIExp`).
+- ✅ **UNIT-1 SI base and derived units**: the 7 base units (gram in place of kilogram, UNIT-6) and 22 derived ones
+  (`BaseUnit`, `KNOWN_UNITS`), each with `name()`, `symbol()`, `dim()` (`Dim`) and `scale()` (`Scale`).
 - ✅ **UNIT-2 All SI prefixes**: quecto to quetta, `u` / `μ` / `µ` for micro, `k` / `K` for kilo. Look-ahead in the
   grammar keeps `m` (meter) apart from `mV`.
-- ✅ **UNIT-3 Unit exponents**: `m^2`, superscripts `m²`, `s⁻¹` (exponent fits in `i8`).
-- ✅ **UNIT-4 Unknown units**: any identifier parses as `BaseUnit::Named` (`10mVDC` → milli + `VDC`), with an empty
-  symbol and a zero dimension vector.
-- ✅ **UNIT-5 Serde**: `Unit`, `BaseUnit`, `Prefix`, `SIExp`, `Quantity` derive `Serialize` / `Deserialize`.
-- 🐛 **UNIT-6 Gram handled as kilogram**: `g` maps to `BaseUnit::Kilogram` without adjusting the prefix, so
-  `10 g` gives 10 kg and `10 kg` becomes `kkg` with value 10000 *(verified 3 Oct 2026)*. Needs a gram base with
-  kilogram as the SI base, or the prefix shifted by -3 on parse.
-- 🐛 **UNIT-7 Degree Celsius only standalone**: `°C` can't take a prefix or exponent and has no offset handling
-  against kelvin.
+- ✅ **UNIT-3 Unit exponents**: `m^2`, superscripts `m²`, `s⁻¹` (exponent fits in `i8`). Superscripts failed to
+  parse before 0.3 (`parse_superscript` in `src/parse.rs`).
+- ✅ **UNIT-4 Unknown units**: any identifier the parser and the registry don't know parses as
+  `BaseUnit::Unknown` (`10mVDC` → milli + `VDC`), with no dimension (`dim()` is `None`).
+- ✅ **UNIT-5 Serde**: `Unit`, `UnitExpr`, `BaseUnit`, `Prefix`, `Dim`, `Scale`, `Quantity`, `NamedUnit` derive
+  `Serialize` / `Deserialize`.
+- ✅ **UNIT-6 Gram as the base of mass**: `BaseUnit::Gram` with `Scale::Pow10(-3)`, `10 kg` is kilo + gram
+  (test `gram_is_the_base_of_mass`). Was: `g` mapped to `Kilogram`, `10 kg` became `kkg`.
+- ✅ **UNIT-7 Degree Celsius affine**: `°C` has `Scale::Affine { factor: 1, offset: 273.15 }`; `to_si_f64` and
+  `UnitExpr::convert_f64` take the offset for a single °C, a compound unit with °C (`ppm/°C`) has none and doesn't
+  convert to SI (test `celsius_is_affine`). A prefix before `°C` is still not parsed.
 - 📋 **UNIT-8 Superscript exponents in `Display`**: `Unit` prints `m^2` instead of `m²` (TODO in `Display for
   Unit`). Check rvariant's round-trip tests when changing it.
-- 💡 **UNIT-9 Named units with dimensions**: let callers register `Named` units with a symbol and a dimension
-  vector (`VDC` = volt), so conversions between them work.
+- ✅ **UNIT-9 Named units registered at run time**: `Registry::register(NamedUnit { name, symbol, dim, scale,
+  aliases })` and `Registry::alias(word, Unit)` (`Vdc` = volt, `ppb` = nano + ratio); `Registry::parse_quantity` /
+  `parse_unit`. SI symbols can't be redefined. A `BaseUnit::Named` value carries its dimension and scale, so stored
+  values convert without the registry (`src/registry.rs`, test `registry`).
+- ✅ **UNIT-10 Unit model after ww_si**: `Dim` (s, m, kg, A, K, mol, cd, ww_si's order) in place of `SIExp`,
+  `Scale::{Coherent, Pow10, Factor, Affine}`, `UnitExpr::{Unit, Mul, Div, Pow}` with `dim()`, `factor()`,
+  `offset()`, `exp10()`, `prefix_exp10()`, `without_prefixes()`, `convert_f64()` (`src/dim.rs`, `src/unit.rs`).
+- ✅ **UNIT-11 Ratios**: `BaseUnit::Ratio` for dimensionless numbers; `%`, `‰`, `ppm` parse as centi, milli and
+  micro + ratio and are written back that way (test `ratios`). A number without unit is a ratio.
 
 ## Numbers and quantities (`NUM`)
 
 - ✅ **NUM-1 `Quantity::parse`**: number plus optional unit, spaces optional (`10V`, `4.7 uF`, ` 10 V `). Keeps the
   number as text, `as_f32()` applies the prefix.
 - ✅ **NUM-2 Unicode minus** (`−`, U+2212) and `-` for negative numbers.
-- 🐛 **NUM-3 Prefix not raised to the exponent**: `Quantity::as_f32` multiplies by the prefix once, so `1 km^2`
-  gives 1000 instead of 1e6 *(verified 3 Oct 2026)*.
+- ✅ **NUM-3 Prefix raised to the exponent**: `1 km^2` is 1e6 m² (`Unit::prefix_exp10`, test
+  `prefix_raised_to_the_exponent`).
 - 🐛 **NUM-4 Exponent notation without a unit**: `Quantity::parse("1e3")` fails with `Internal("expected unit")`;
   `2.5e-3 V` works *(verified 3 Oct 2026)*.
-- 📋 **NUM-5 `f64` and exact values**: only `as_f32` exists. Add `as_f64` and keep integer values exact for callers
-  that need them (rvariant converts between number types).
+- ✅ **NUM-5 `f64` and exact values**: `Quantity::value_f64`, `as_f64`, `as_f32` (unit without prefixes),
+  `to_si_f64` (coherent SI), exact `base_decimal` (decimal point moved as text) and `base_i64` (test
+  `f64_and_exact_values`).
 - 📋 **NUM-6 Error messages**: `Error::Internal` strings name grammar rules (`"expected simple_number"`), not what
   was wrong with the input. Give users a message they can act on, with the position.
 
@@ -73,8 +83,8 @@ Last full review: 3 Oct 2026 (commit `b14b5aa`, 0.1.0). Built from the code and 
 
 - ⬜ **EXPR-1 `SIExpr::parse`**: the grammar parses `10*V/us`, `10 V/us`, parentheses, `*` / `⋅` / `/`, but the
   function prints the parse tree with `println!` and returns `SIExpr::Num("")`. `Quantity::parse("1 m/s")` fails.
-- 📋 **EXPR-2 Dimension check**: reduce an expression to an `SIExp` and compare units by dimension (`V/A` = `Ω`),
-  for conversions in rvariant.
+- 🚧 **EXPR-2 Dimension check**: `UnitExpr::dim()` reduces an expression to a `Dim`, `convert_f64` converts
+  between units of one dimension (`V/mA` to `kΩ`). Missing: parsing expressions into `UnitExpr` (EXPR-1).
 
 ## Project (`PRJ`)
 

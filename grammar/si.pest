@@ -37,7 +37,10 @@ raw_unit = {
     radian | steradian | hertz | newton | pascal | joule | watt | coulomb | volt | farad | ohm |
     siemens | weber | tesla | henry | celsius | lumen | lux | becquerel | gray | sievert | katal | ident
 }
-unit = { prefix? ~ raw_unit ~ (("^" ~ integer_number) | ss_number)? }
+// Ratios: % is centi, ‰ milli, ppm micro (tried before a prefix, or ppm would be pico + pm)
+ratio_unit = { "%" | "‰" | ("ppm" ~ !ASCII_ALPHANUMERIC) }
+unit = { (ratio_unit | (prefix? ~ raw_unit)) ~ (("^" ~ integer_number) | ss_number)? }
+unit_only = { SOI ~ silent_space? ~ unit ~ silent_space? ~ EOI }
 term = { unit | number }
 unit_expr = { paren | (term ~ silent_space? ~ (verb ~ silent_space? ~ unit_expr)*) }
 si_expr = { SOI ~ silent_space? ~ (&(number ~ silent_space? ~ unit) ~ number)? ~ silent_space? ~ unit_expr ~ silent_space? ~ EOI }

@@ -1,454 +1,92 @@
+//! SI quantities and units parsed from text at run time: `4.7 uF`, `10mV`, `4k7` (resistance), `ppm`, `km²`.
+//!
+//! The unit model follows ww_si (wire_weaver): a [Unit] is a [Prefix], a [BaseUnit] and an exponent; [UnitExpr] is
+//! a product, quotient or power of units; every unit has a [Dim] (SI base-unit exponents) and a [Scale] to coherent
+//! SI (the gram is 10⁻³ kg, °C is affine). Units beyond the SI set are registered at run time in a [Registry].
+
+mod dim;
+mod parse;
+mod registry;
+mod unit;
+
+pub use dim::{Dim, Scale};
+pub use registry::{NamedUnit, Registry};
+pub use unit::{BaseUnit, KNOWN_UNITS, Prefix, Unit, UnitExpr};
+
+use parse::{Rule, SIParser, expected_rule, parse_integer_number_i64, parse_prefix};
 use pest::Parser;
 use pest::iterators::Pair;
-use pest_derive::Parser;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
 use std::num::{ParseFloatError, ParseIntError};
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub enum BaseUnit {
-    Second,
-    Meter,
-    Kilogram,
-    Ampere,
-    Kelvin,
-    Mole,
-    Candela,
-
-    Radian,
-    Steradian,
-    Hertz,
-    Newton,
-    Pascal,
-    Joule,
-    Watt,
-    Coulomb,
-    Volt,
-    Farad,
-    Ohm,
-    Siemens,
-    Weber,
-    Tesla,
-    Henry,
-    DegreeCelsius,
-    Lumen,
-    Lux,
-    Becquerel,
-    Gray,
-    Sievert,
-    Katal,
-    Named {
-        name: String,
-        symbol: String,
-        exp: SIExp,
-    },
-    Unitless,
-    // NamedStatic {
-    //     name: &'static str,
-    //     symbol: &'static str,
-    //     exp: SIExp,
-    // },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct Unit {
-    pub prefix: Prefix,
-    pub base: BaseUnit,
-    pub exp: i8,
-}
-
-impl Unit {
-    pub fn unit() -> Self {
-        Unit {
-            prefix: Prefix::Unit,
-            base: BaseUnit::Unitless,
-            exp: 1,
-        }
-    }
-
-    pub fn base(base: BaseUnit) -> Self {
-        Unit {
-            prefix: Prefix::Unit,
-            base,
-            exp: 1,
-        }
-    }
-}
-
-impl Display for Unit {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        if self.exp == 1 {
-            write!(f, "{}{}", self.prefix, self.base)
-        } else {
-            // TODO: use superscript
-            write!(f, "{}{}^{}", self.prefix, self.base, self.exp)
-        }
-    }
-}
-
-pub const KNOWN_UNITS: [BaseUnit; 7 + 22] = [
-    BaseUnit::Second,
-    BaseUnit::Meter,
-    BaseUnit::Kilogram,
-    BaseUnit::Ampere,
-    BaseUnit::Kelvin,
-    BaseUnit::Mole,
-    BaseUnit::Candela,
-    BaseUnit::Radian,
-    BaseUnit::Steradian,
-    BaseUnit::Hertz,
-    BaseUnit::Newton,
-    BaseUnit::Pascal,
-    BaseUnit::Joule,
-    BaseUnit::Watt,
-    BaseUnit::Coulomb,
-    BaseUnit::Volt,
-    BaseUnit::Farad,
-    BaseUnit::Ohm,
-    BaseUnit::Siemens,
-    BaseUnit::Weber,
-    BaseUnit::Tesla,
-    BaseUnit::Henry,
-    BaseUnit::DegreeCelsius,
-    BaseUnit::Lumen,
-    BaseUnit::Lux,
-    BaseUnit::Becquerel,
-    BaseUnit::Gray,
-    BaseUnit::Sievert,
-    BaseUnit::Katal,
-];
-
-impl BaseUnit {
-    pub fn exp(&self) -> SIExp {
-        match self {
-            BaseUnit::Second => SIExp::new_reduced(0, 0, 1, 0),
-            BaseUnit::Meter => SIExp::new_reduced(1, 0, 0, 0),
-            BaseUnit::Kilogram => SIExp::new_reduced(0, 1, 0, 0),
-            BaseUnit::Ampere => SIExp::new_reduced(0, 0, 0, 1),
-            BaseUnit::Kelvin => SIExp::new(0, 0, 0, 0, 1, 0, 0),
-            BaseUnit::Mole => SIExp::new(0, 0, 0, 0, 0, 1, 0),
-            BaseUnit::Candela => SIExp::new(0, 0, 0, 0, 0, 0, 1),
-            BaseUnit::Radian => SIExp::new_reduced(0, 0, 0, 0),
-            BaseUnit::Steradian => SIExp::new_reduced(0, 0, 0, 0),
-            BaseUnit::Hertz => SIExp::new_reduced(0, 0, -1, 0),
-            BaseUnit::Newton => SIExp::new_reduced(1, 1, -2, 0),
-            BaseUnit::Pascal => SIExp::new_reduced(-1, 1, -2, 0),
-            BaseUnit::Joule => SIExp::new_reduced(2, 1, -2, 0),
-            BaseUnit::Watt => SIExp::new_reduced(2, 1, -3, 0),
-            BaseUnit::Coulomb => SIExp::new_reduced(0, 0, 1, 1),
-            BaseUnit::Volt => SIExp::new_reduced(2, 1, -3, -1),
-            BaseUnit::Farad => SIExp::new_reduced(-2, -1, 4, 2),
-            BaseUnit::Ohm => SIExp::new_reduced(2, 1, -3, -2),
-            BaseUnit::Siemens => SIExp::new_reduced(-2, -1, 3, 2),
-            BaseUnit::Weber => SIExp::new_reduced(2, 1, -2, -1),
-            BaseUnit::Tesla => SIExp::new_reduced(0, 1, -2, -1),
-            BaseUnit::Henry => SIExp::new_reduced(2, 1, -2, -2),
-            BaseUnit::DegreeCelsius => SIExp::new(0, 0, 0, 0, 1, 0, 0),
-            BaseUnit::Lumen => SIExp::new(0, 0, 0, 0, 0, 0, 1),
-            BaseUnit::Lux => SIExp::new(-2, 0, 0, 0, 0, 0, 1),
-            BaseUnit::Becquerel => SIExp::new_reduced(0, 0, -1, 0),
-            BaseUnit::Gray => SIExp::new_reduced(2, 0, -2, 0),
-            BaseUnit::Sievert => SIExp::new_reduced(2, 0, -2, 0),
-            BaseUnit::Katal => SIExp::new(0, 0, -1, 0, 0, 1, 0),
-            BaseUnit::Named { exp, .. } => *exp,
-            // SIUnit::NamedStatic { exp, .. } => *exp,
-            BaseUnit::Unitless => SIExp::new_reduced(0, 0, 0, 0),
-        }
-    }
-
-    pub fn name(&self) -> &str {
-        match self {
-            BaseUnit::Second => "Second",
-            BaseUnit::Meter => "Meter",
-            BaseUnit::Kilogram => "Kilogram",
-            BaseUnit::Ampere => "Ampere",
-            BaseUnit::Kelvin => "Kelvin",
-            BaseUnit::Mole => "Mole",
-            BaseUnit::Candela => "Candela",
-            BaseUnit::Radian => "Radian",
-            BaseUnit::Steradian => "Steradian",
-            BaseUnit::Hertz => "Hertz",
-            BaseUnit::Newton => "Newton",
-            BaseUnit::Pascal => "Pascal",
-            BaseUnit::Joule => "Joule",
-            BaseUnit::Watt => "Watt",
-            BaseUnit::Coulomb => "Coulomb",
-            BaseUnit::Volt => "Volt",
-            BaseUnit::Farad => "Farad",
-            BaseUnit::Ohm => "Ohm",
-            BaseUnit::Siemens => "Siemens",
-            BaseUnit::Weber => "Weber",
-            BaseUnit::Tesla => "Tesla",
-            BaseUnit::Henry => "Henry",
-            BaseUnit::DegreeCelsius => "Degree Celsius",
-            BaseUnit::Lumen => "Lumen",
-            BaseUnit::Lux => "Lux",
-            BaseUnit::Becquerel => "Becquerel",
-            BaseUnit::Gray => "Gray",
-            BaseUnit::Sievert => "Sievert",
-            BaseUnit::Katal => "Katal",
-            BaseUnit::Named { name, .. } => name.as_str(),
-            BaseUnit::Unitless => "Unitless",
-        }
-    }
-
-    pub fn symbol(&self) -> &str {
-        match self {
-            BaseUnit::Second => "s",
-            BaseUnit::Meter => "m",
-            BaseUnit::Kilogram => "kg",
-            BaseUnit::Ampere => "A",
-            BaseUnit::Kelvin => "K",
-            BaseUnit::Mole => "mol",
-            BaseUnit::Candela => "cd",
-            BaseUnit::Radian => "rad",
-            BaseUnit::Steradian => "sr",
-            BaseUnit::Hertz => "Hz",
-            BaseUnit::Newton => "N",
-            BaseUnit::Pascal => "Pa",
-            BaseUnit::Joule => "J",
-            BaseUnit::Watt => "W",
-            BaseUnit::Coulomb => "C",
-            BaseUnit::Volt => "V",
-            BaseUnit::Farad => "F",
-            BaseUnit::Ohm => "Ω",
-            BaseUnit::Siemens => "S",
-            BaseUnit::Weber => "Wb",
-            BaseUnit::Tesla => "T",
-            BaseUnit::Henry => "H",
-            BaseUnit::DegreeCelsius => "°C",
-            BaseUnit::Lumen => "lm",
-            BaseUnit::Lux => "lx",
-            BaseUnit::Becquerel => "Bq",
-            BaseUnit::Gray => "Gy",
-            BaseUnit::Sievert => "Sv",
-            BaseUnit::Katal => "kat",
-            BaseUnit::Named { name, .. } => name.as_str(),
-            // SIUnit::NamedStatic { name, .. } => name,
-            BaseUnit::Unitless => "()",
-        }
-    }
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct SIExp(pub [i8; 7]);
-
-impl SIExp {
-    pub const fn new(
-        meter: i8,
-        kilogram: i8,
-        second: i8,
-        ampere: i8,
-        kelvin: i8,
-        mole: i8,
-        candela: i8,
-    ) -> Self {
-        SIExp([meter, kilogram, second, ampere, kelvin, mole, candela])
-    }
-
-    pub const fn new_reduced(meter: i8, kilogram: i8, second: i8, ampere: i8) -> Self {
-        SIExp([meter, kilogram, second, ampere, 0, 0, 0])
-    }
-
-    pub fn meter(&self) -> i8 {
-        self.0[0]
-    }
-
-    pub fn kilogram(&self) -> i8 {
-        self.0[1]
-    }
-
-    pub fn second(&self) -> i8 {
-        self.0[2]
-    }
-
-    pub fn ampere(&self) -> i8 {
-        self.0[3]
-    }
-
-    pub fn kelvin(&self) -> i8 {
-        self.0[4]
-    }
-
-    pub fn mole(&self) -> i8 {
-        self.0[5]
-    }
-
-    pub fn candela(&self) -> i8 {
-        self.0[6]
-    }
-}
-
+/// A number and its unit, as parsed: the number keeps its text (`4.7`, `-1.5e3`), so nothing is lost before the
+/// caller converts it.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct Quantity {
     pub number: String,
-    pub unit: Unit,
+    pub unit: UnitExpr,
 }
 
 impl Quantity {
+    /// A number with an optional unit, with only the built-in words; [Registry::parse_quantity] knows more.
     pub fn parse(s: impl AsRef<str>) -> Result<Quantity, Error> {
-        let mut p = SIParser::parse(Rule::si_number, s.as_ref())?
-            .into_iter()
-            .next()
-            .ok_or(Error::Internal("expected si_number".into()))?
-            .into_inner();
-        let number = p
-            .next()
-            .ok_or(Error::Internal("expected number".into()))?
-            .as_str();
-        let unit = if let Some(unit) = p.next() {
-            parse_unit(unit)?
-        } else {
-            Unit::unit()
-        };
-        Ok(Quantity {
-            number: number.to_string(),
-            unit,
-        })
+        parse::quantity(s.as_ref(), &Registry::new())
     }
 
-    pub fn as_f32(&self) -> Result<f32, ParseFloatError> {
-        let number = self.number.parse::<f32>()?;
-        Ok(number * self.unit.prefix.as_f32())
+    /// The number as written, in the unit with its prefixes.
+    pub fn value_f64(&self) -> Result<f64, Error> {
+        Ok(self.number.replace('\u{2212}', "-").parse::<f64>()?)
     }
-}
 
-fn parse_unit(p: Pair<Rule>) -> Result<Unit, Error> {
-    if !matches!(p.as_rule(), Rule::unit) {
-        return Err(Error::Internal("expected unit".into()));
+    /// The value in the unit without prefixes, as exact decimal text: `4.7 kΩ` is `4700` (Ω), `1 km²` is `1000000`
+    /// (m²), `10 kg` is `10000` (g), `50 ppm` is `0.00005`.
+    pub fn base_decimal(&self) -> Result<String, Error> {
+        parse::shift_decimal(&self.number, self.unit.prefix_exp10())
+            .ok_or_else(|| Error::Internal(format!("bad number {:?}", self.number)))
     }
-    let mut p = p.into_inner();
-    let prefix_or_raw_unit = p
-        .next()
-        .ok_or(Error::Internal("expected prefix or unit".into()))?;
-    let (prefix, raw_unit) = if prefix_or_raw_unit.as_rule() == Rule::prefix {
-        let raw_unit = p
-            .next()
-            .ok_or(Error::Internal("expected raw_unit".into()))?;
-        (parse_prefix(prefix_or_raw_unit)?, raw_unit)
-    } else {
-        (Prefix::Unit, prefix_or_raw_unit)
-    };
-    let base = parse_raw_unit(raw_unit)?;
-    let exp = if let Some(num) = p.next() {
-        parse_integer_number_i64(num)?
-    } else {
-        1
-    };
-    let exp =
-        i8::try_from(exp).map_err(|_| Error::Internal("unit exponent must fit in i8".into()))?;
-    Ok(Unit { prefix, base, exp })
-}
 
-fn parse_raw_unit(p: Pair<Rule>) -> Result<BaseUnit, Error> {
-    if !matches!(p.as_rule(), Rule::raw_unit) {
-        return Err(Error::Internal("expected raw_unit".into()));
+    /// [base_decimal](Self::base_decimal) as an integer, `None` when it has a fraction or doesn't fit.
+    pub fn base_i64(&self) -> Result<Option<i64>, Error> {
+        Ok(self.base_decimal()?.parse::<i64>().ok())
     }
-    let raw_unit = p.into_inner().next().ok_or(Error::Internal("".into()))?;
-    let unit = match raw_unit.as_rule() {
-        Rule::second => BaseUnit::Second,
-        Rule::meter => BaseUnit::Meter,
-        Rule::gram => BaseUnit::Kilogram, // prefix handled separately
-        Rule::ampere => BaseUnit::Ampere,
-        Rule::kelvin => BaseUnit::Kelvin,
-        Rule::mole => BaseUnit::Mole,
-        Rule::candela => BaseUnit::Candela,
 
-        Rule::radian => BaseUnit::Radian,
-        Rule::steradian => BaseUnit::Steradian,
-        Rule::hertz => BaseUnit::Hertz,
-        Rule::newton => BaseUnit::Newton,
-        Rule::pascal => BaseUnit::Pascal,
-        Rule::joule => BaseUnit::Joule,
-        Rule::watt => BaseUnit::Watt,
-        Rule::coulomb => BaseUnit::Coulomb,
-        Rule::volt => BaseUnit::Volt,
-        Rule::farad => BaseUnit::Farad,
-        Rule::ohm => BaseUnit::Ohm,
-        Rule::siemens => BaseUnit::Siemens,
-        Rule::weber => BaseUnit::Weber,
-        Rule::tesla => BaseUnit::Tesla,
-        Rule::henry => BaseUnit::Henry,
-        Rule::celsius => BaseUnit::DegreeCelsius,
-        Rule::lumen => BaseUnit::Lumen,
-        Rule::lux => BaseUnit::Lux,
-        Rule::becquerel => BaseUnit::Becquerel,
-        Rule::gray => BaseUnit::Gray,
-        Rule::sievert => BaseUnit::Sievert,
-        Rule::katal => BaseUnit::Katal,
+    /// The value in the unit without prefixes (the prefix raised to the unit's exponent): `1 km²` is 1e6 (m²).
+    pub fn as_f64(&self) -> Result<f64, Error> {
+        Ok(self.base_decimal()?.parse::<f64>()?)
+    }
 
-        Rule::ident => BaseUnit::Named {
-            name: raw_unit.as_str().to_string(),
-            symbol: "".to_string(),
-            exp: SIExp::new_reduced(0, 0, 0, 0),
-        },
-        _ => return Err(Error::Internal("unhandled raw_unit".into())),
-    };
-    Ok(unit)
-}
+    /// Like [as_f64](Self::as_f64), in `f32`.
+    pub fn as_f32(&self) -> Result<f32, Error> {
+        Ok(self.base_decimal()?.parse::<f32>()?)
+    }
 
-pub enum SIExpr {
-    Num(String),
-    Unit { prefix: Prefix, unit: Unit },
-    Mul((Box<SIExpr>, Box<SIExpr>)),
-    Div((Box<SIExpr>, Box<SIExpr>)),
-}
-
-impl SIExpr {
-    pub fn parse(s: impl AsRef<str>) -> Result<SIExpr, Error> {
-        let p = SIParser::parse(Rule::si_expr, s.as_ref())?;
-        println!("{p:#?}");
-        // Err(Error::Internal("unimplemented".into()))
-        Ok(SIExpr::Num("".into()))
+    /// The value in coherent SI through the unit's scale: `10 g` is 0.01 (kg), `25 °C` is 298.15 (K); fails for an
+    /// unknown word and for °C inside a compound unit.
+    pub fn to_si_f64(&self) -> Result<f64, Error> {
+        self.unit
+            .to_si_f64(self.value_f64()?)
+            .ok_or_else(|| Error::Internal(format!("{} doesn't convert to SI", self.unit)))
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub enum Prefix {
-    Milli,
-    Micro,
-    Nano,
-    Pico,
-
-    Kilo,
-    Mega,
-    Giga,
-
-    Unit,
-
-    Deca,
-    Hecto,
-    Tera,
-    Peta,
-    Exa,
-    Zetta,
-    Yotta,
-    Ronna,
-    Quetta,
-
-    Deci,
-    Centi,
-    Femto,
-    Atto,
-    Zepto,
-    Yocto,
-    Ronto,
-    Quecto,
-}
-
+/// Resistance in ohms, from resistor notation: `4k7`, `499kR`, `12 kOhms`, `1 mΩ`.
 pub struct OhmF32(pub f32);
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum Error {
-    Pest(pest::error::Error<Rule>),
+    Pest(Box<pest::error::Error<Rule>>),
     Float(ParseFloatError),
     Int(ParseIntError),
+    /// A unit can't be registered: the word is an SI symbol or stands for another unit.
+    Registry(String),
     Internal(String),
 }
 
 impl From<pest::error::Error<Rule>> for Error {
     fn from(e: pest::error::Error<Rule>) -> Self {
-        Error::Pest(e)
+        Error::Pest(Box::new(e))
     }
 }
 
@@ -470,86 +108,13 @@ impl Display for Error {
             Error::Pest(e) => write!(f, "{}", e),
             Error::Float(e) => write!(f, "{}", e),
             Error::Int(e) => write!(f, "{}", e),
+            Error::Registry(e) => write!(f, "{}", e),
             Error::Internal(e) => write!(f, "Internal: {}", e),
         }
     }
 }
 
-fn expected_rule(name: &'static str) -> Error {
-    Error::Internal(name.to_string())
-}
-
-impl Prefix {
-    pub fn as_f32(&self) -> f32 {
-        match self {
-            Prefix::Milli => 1e-3,
-            Prefix::Micro => 1e-6,
-            Prefix::Nano => 1e-9,
-            Prefix::Pico => 1e-12,
-            Prefix::Kilo => 1e3,
-            Prefix::Mega => 1e6,
-            Prefix::Giga => 1e9,
-            Prefix::Unit => 1e0,
-            Prefix::Deca => 1e1,
-            Prefix::Hecto => 1e2,
-            Prefix::Tera => 1e12,
-            Prefix::Peta => 1e15,
-            Prefix::Exa => 1e18,
-            Prefix::Zetta => 1e21,
-            Prefix::Yotta => 1e24,
-            Prefix::Ronna => 1e27,
-            Prefix::Quetta => 1e30,
-            Prefix::Deci => 1e-1,
-            Prefix::Centi => 1e-2,
-            Prefix::Femto => 1e-15,
-            Prefix::Atto => 1e-18,
-            Prefix::Zepto => 1e-21,
-            Prefix::Yocto => 1e-24,
-            Prefix::Ronto => 1e-27,
-            Prefix::Quecto => 1e-30,
-        }
-    }
-
-    pub fn symbol(&self) -> &'static str {
-        match self {
-            Prefix::Milli => "m",
-            Prefix::Micro => "μ", // U+03BC
-            Prefix::Nano => "n",
-            Prefix::Pico => "p",
-            Prefix::Kilo => "k",
-            Prefix::Mega => "M",
-            Prefix::Giga => "G",
-            Prefix::Unit => "",
-            Prefix::Deca => "da",
-            Prefix::Hecto => "h",
-            Prefix::Tera => "T",
-            Prefix::Peta => "P",
-            Prefix::Exa => "E",
-            Prefix::Zetta => "Z",
-            Prefix::Yotta => "Y",
-            Prefix::Ronna => "R",
-            Prefix::Quetta => "Q",
-            Prefix::Deci => "d",
-            Prefix::Centi => "c",
-            Prefix::Femto => "f",
-            Prefix::Atto => "a",
-            Prefix::Zepto => "z",
-            Prefix::Yocto => "y",
-            Prefix::Ronto => "r",
-            Prefix::Quecto => "q",
-        }
-    }
-}
-
-impl Display for Prefix {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.symbol())
-    }
-}
-
-#[derive(Parser)]
-#[grammar = "grammar/si.pest"]
-struct SIParser;
+impl std::error::Error for Error {}
 
 impl OhmF32 {
     pub fn parse(s: impl AsRef<str>) -> Result<OhmF32, Error> {
@@ -630,138 +195,285 @@ fn parse_any_number_f32(num: Pair<Rule>) -> Result<f32, Error> {
     }
 }
 
-fn parse_integer_number_i64(rule: Pair<Rule>) -> Result<i64, Error> {
-    if rule.as_rule() != Rule::integer_number {
-        return Err(Error::Internal("expected simple_number".into()));
-    }
-    let mut p = rule.into_inner();
-    let minus_or_raw_number = p.next().ok_or(expected_rule("minus or raw_number"))?;
-    let is_minus = minus_or_raw_number.as_rule() == Rule::minus;
-    let int = if is_minus {
-        let int = p.next().ok_or(expected_rule("integer"))?.into_inner();
-        int.as_str()
-    } else {
-        minus_or_raw_number.as_str()
-    };
-    let v: i64 = int.parse()?;
-    if is_minus { Ok(-v) } else { Ok(v) }
-}
-
-fn parse_prefix(rule: Pair<Rule>) -> Result<Prefix, Error> {
-    let rule = rule.into_inner().next().ok_or(expected_rule("prefix"))?;
-    let prefix = match rule.as_rule() {
-        Rule::quetta => Prefix::Quetta,
-        Rule::ronna => Prefix::Ronna,
-        Rule::yotta => Prefix::Yotta,
-        Rule::zetta => Prefix::Zetta,
-        Rule::exa => Prefix::Exa,
-        Rule::peta => Prefix::Peta,
-        Rule::tera => Prefix::Tera,
-        Rule::tera_unconditional => Prefix::Tera,
-        Rule::giga => Prefix::Giga,
-        Rule::giga_unconditional => Prefix::Giga,
-        Rule::mega => Prefix::Mega,
-        Rule::mega_unconditional => Prefix::Mega,
-        Rule::kilo => Prefix::Kilo,
-        Rule::kilo_unconditional => Prefix::Kilo,
-        Rule::hecto => Prefix::Hecto,
-        Rule::deca => Prefix::Deca,
-        Rule::deci => Prefix::Deci,
-        Rule::centi => Prefix::Centi,
-        Rule::milli => Prefix::Milli,
-        Rule::milli_unconditional => Prefix::Milli,
-        Rule::micro => Prefix::Micro,
-        Rule::micro_unconditional => Prefix::Micro,
-        Rule::nano => Prefix::Nano,
-        Rule::nano_unconditional => Prefix::Nano,
-        Rule::pico => Prefix::Pico,
-        Rule::femto => Prefix::Femto,
-        Rule::atto => Prefix::Atto,
-        Rule::zepto => Prefix::Zepto,
-        Rule::yocto => Prefix::Yocto,
-        Rule::ronto => Prefix::Ronto,
-        Rule::quecto => Prefix::Quecto,
-        _ => return Err(Error::Internal("expected prefix rule".into())),
-    };
-    Ok(prefix)
-}
-
-impl Display for BaseUnit {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.symbol())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use float_cmp::approx_eq;
 
-    #[test]
-    fn expr() {
-        // let pairs = SIParser::parse(Rule::si_number, "10kg").unwrap();
-        // println!("{pairs:#?}");
-        // let pairs = SIParser::parse(Rule::si_number, "10 V/s").unwrap();
-        // println!("{pairs:#?}");
-        // let _expr = SIExpr::parse("10*V/us").unwrap();
-        // println!("{pairs:#?}");
-        // let v = SIValueF32::parse("9.80665 m/s²").unwrap();
-        // assert_eq!(v.value, 9.80665);
-        // assert_eq!(v.unit, SIUnit::new_reduced_exp(-2, 1, 0, 0));
-        // let _expr = SIExpr::parse("1 m/s⁻²").unwrap();
-        // println!("{pairs:#?}");
-        // let pairs = SIParser::parse(Rule::si_number, "9.8 m/s^2").unwrap();
-        // println!("{pairs:#?}");
-        // let pairs = SIParser::parse(Rule::si_number, "1 m/s^-2").unwrap();
-        // println!("{pairs:#?}");
+    /// The single unit of a parsed quantity.
+    fn unit_of(q: &Quantity) -> &Unit {
+        q.unit.as_unit().expect("a single unit")
     }
 
     #[test]
     fn si_number_voltage() {
         let num = Quantity::parse("10V").unwrap();
         assert_eq!(num.number, "10");
-        assert_eq!(num.unit.prefix, Prefix::Unit);
-        assert_eq!(num.unit.base, BaseUnit::Volt);
-        assert_eq!(num.unit.exp, 1);
+        assert_eq!(unit_of(&num).prefix, Prefix::Unit);
+        assert_eq!(unit_of(&num).base, BaseUnit::Volt);
+        assert_eq!(unit_of(&num).exp, 1);
         assert!(approx_eq!(f32, num.as_f32().unwrap(), 10.0, ulps = 2));
 
         let num = Quantity::parse("10mV").unwrap();
         assert_eq!(num.number, "10");
-        assert_eq!(num.unit.prefix, Prefix::Milli);
-        assert_eq!(num.unit.base, BaseUnit::Volt);
-        assert_eq!(num.unit.exp, 1);
+        assert_eq!(unit_of(&num).prefix, Prefix::Milli);
+        assert_eq!(unit_of(&num).base, BaseUnit::Volt);
+        assert_eq!(unit_of(&num).exp, 1);
         assert!(approx_eq!(f32, num.as_f32().unwrap(), 0.01, ulps = 2));
 
         let num = Quantity::parse("10mVDC").unwrap();
         assert_eq!(num.number, "10");
-        assert_eq!(num.unit.prefix, Prefix::Milli);
-        assert_eq!(num.unit.base.name(), "VDC");
+        assert_eq!(unit_of(&num).prefix, Prefix::Milli);
+        assert_eq!(unit_of(&num).base.name(), "VDC");
     }
 
     #[test]
     fn si_number_capacitance() {
         let num = Quantity::parse("4.7 uF").unwrap();
         assert_eq!(num.number, "4.7");
-        assert_eq!(num.unit.prefix, Prefix::Micro);
-        assert_eq!(num.unit.base, BaseUnit::Farad);
-        assert_eq!(num.unit.exp, 1);
+        assert_eq!(unit_of(&num).prefix, Prefix::Micro);
+        assert_eq!(unit_of(&num).base, BaseUnit::Farad);
+        assert_eq!(unit_of(&num).exp, 1);
         assert!(approx_eq!(f32, num.as_f32().unwrap(), 4.7e-6, ulps = 2));
 
         let num = Quantity::parse("4.7 µF").unwrap();
         assert_eq!(num.number, "4.7");
-        assert_eq!(num.unit.prefix, Prefix::Micro);
-        assert_eq!(num.unit.base, BaseUnit::Farad);
-        assert_eq!(num.unit.exp, 1);
+        assert_eq!(unit_of(&num).prefix, Prefix::Micro);
+        assert_eq!(unit_of(&num).base, BaseUnit::Farad);
+        assert_eq!(unit_of(&num).exp, 1);
         assert!(approx_eq!(f32, num.as_f32().unwrap(), 4.7e-6, ulps = 2));
     }
 
     #[test]
-    fn expr_leading_number() {
-        let _expr = SIExpr::parse("10*V/us").unwrap();
-        let _expr = SIExpr::parse("10 V/us").unwrap();
-        let _expr = SIExpr::parse("  10 V/us").unwrap();
-        let _expr = SIExpr::parse(" 10V ").unwrap();
-        let _expr = SIExpr::parse("10").unwrap();
+    fn gram_is_the_base_of_mass() {
+        // UNIT-6: 10 g was 10 kg, 10 kg was kilo-kilogram
+        let q = Quantity::parse("10 g").unwrap();
+        assert_eq!(*unit_of(&q), Unit::new(Prefix::Unit, BaseUnit::Gram, 1));
+        assert_eq!(q.as_f64().unwrap(), 10.0);
+        assert!(approx_eq!(f64, q.to_si_f64().unwrap(), 0.01, ulps = 2));
+
+        let q = Quantity::parse("10 kg").unwrap();
+        assert_eq!(*unit_of(&q), Unit::new(Prefix::Kilo, BaseUnit::Gram, 1));
+        assert_eq!(q.as_f64().unwrap(), 10_000.0);
+        assert_eq!(q.to_si_f64().unwrap(), 10.0);
+        assert_eq!(q.unit.to_string(), "kg");
+        assert_eq!(q.unit.exp10(), Some(0));
+        assert_eq!(q.unit.dim(), Some(Dim::new(0, 0, 1, 0, 0, 0, 0)));
+    }
+
+    #[test]
+    fn celsius_is_affine() {
+        // UNIT-7
+        let q = Quantity::parse("25 °C").unwrap();
+        assert_eq!(unit_of(&q).base, BaseUnit::DegreeCelsius);
+        assert_eq!(q.as_f64().unwrap(), 25.0);
+        assert!(approx_eq!(f64, q.to_si_f64().unwrap(), 298.15, ulps = 2));
+        let kelvin = UnitExpr::from(BaseUnit::Kelvin);
+        let celsius = UnitExpr::from(BaseUnit::DegreeCelsius);
+        assert!(approx_eq!(
+            f64,
+            celsius.convert_f64(-40.0, &kelvin).unwrap(),
+            233.15,
+            ulps = 2
+        ));
+        assert!(approx_eq!(
+            f64,
+            kelvin.convert_f64(0.0, &celsius).unwrap(),
+            -273.15,
+            ulps = 2
+        ));
+        assert_eq!(celsius.exp10(), None);
+        // a coefficient per °C is a quotient: no offset there
+        let tc = Quantity::parse("50 ppm").unwrap().unit / (celsius.clone());
+        assert!(tc.has_offset());
+        assert_eq!(tc.offset(), 0.0);
+        assert_eq!(tc.to_si_f64(1.0), None);
+        assert_eq!(tc.dim(), Some(Dim::new(0, 0, 0, 0, -1, 0, 0)));
+        assert_eq!(tc.to_string(), "ppm/°C");
+    }
+
+    #[test]
+    fn ratios() {
+        let q = Quantity::parse("5%").unwrap();
+        assert_eq!(*unit_of(&q), Unit::new(Prefix::Centi, BaseUnit::Ratio, 1));
+        assert_eq!(q.base_decimal().unwrap(), "0.05");
+        assert_eq!(q.unit.to_string(), "%");
+
+        let q = Quantity::parse("2 ‰").unwrap();
+        assert_eq!(*unit_of(&q), Unit::new(Prefix::Milli, BaseUnit::Ratio, 1));
+        assert_eq!(q.unit.to_string(), "‰");
+
+        let q = Quantity::parse("50ppm").unwrap();
+        assert_eq!(*unit_of(&q), Unit::new(Prefix::Micro, BaseUnit::Ratio, 1));
+        assert_eq!(q.base_decimal().unwrap(), "0.00005");
+        assert_eq!(q.unit.to_string(), "ppm");
+        assert_eq!(q.unit.dim(), Some(Dim::ONE));
+
+        let q = Quantity::parse("10").unwrap();
+        assert_eq!(q.unit, UnitExpr::one());
+        assert_eq!(q.unit.to_string(), "");
+        // ppm converts to % by a power of ten
+        let percent = Quantity::parse("1%").unwrap().unit;
+        let ppm = Quantity::parse("1ppm").unwrap().unit;
+        assert!(percent.same_but_prefixes(&ppm));
+        assert!(approx_eq!(
+            f64,
+            ppm.convert_f64(10_000.0, &percent).unwrap(),
+            1.0,
+            ulps = 2
+        ));
+    }
+
+    #[test]
+    fn prefix_raised_to_the_exponent() {
+        // NUM-3: 1 km^2 was 1000
+        let q = Quantity::parse("1 km^2").unwrap();
+        assert_eq!(*unit_of(&q), Unit::new(Prefix::Kilo, BaseUnit::Meter, 2));
+        assert_eq!(q.as_f64().unwrap(), 1e6);
+        assert_eq!(q.as_f32().unwrap(), 1e6);
+        assert_eq!(q.unit.dim(), Some(Dim::new(0, 2, 0, 0, 0, 0, 0)));
+
+        let q = Quantity::parse("2 cm³").unwrap();
+        assert_eq!(*unit_of(&q), Unit::new(Prefix::Centi, BaseUnit::Meter, 3));
+        assert_eq!(q.base_decimal().unwrap(), "0.000002");
+
+        let q = Quantity::parse("5 ms⁻¹").unwrap();
+        assert_eq!(*unit_of(&q), Unit::new(Prefix::Milli, BaseUnit::Second, -1));
+        assert_eq!(q.as_f64().unwrap(), 5000.0);
+    }
+
+    #[test]
+    fn f64_and_exact_values() {
+        // NUM-5
+        let q = Quantity::parse("13.7 kV").unwrap();
+        assert_eq!(q.value_f64().unwrap(), 13.7);
+        assert_eq!(q.base_decimal().unwrap(), "13700");
+        assert_eq!(q.base_i64().unwrap(), Some(13700));
+        assert_eq!(q.as_f64().unwrap(), 13700.0);
+
+        let q = Quantity::parse("4.7 uF").unwrap();
+        assert_eq!(q.base_decimal().unwrap(), "0.0000047");
+        assert_eq!(q.base_i64().unwrap(), None);
+        assert_eq!(q.as_f64().unwrap(), 4.7e-6);
+
+        let q = Quantity::parse("−2.5e-3 MV").unwrap();
+        assert_eq!(q.base_decimal().unwrap(), "-2500");
+        assert_eq!(q.value_f64().unwrap(), -2.5e-3);
+
+        let q = Quantity::parse("123456789012345678 nV").unwrap();
+        assert_eq!(q.base_decimal().unwrap(), "123456789.012345678");
+    }
+
+    #[test]
+    fn shift_decimal() {
+        use crate::parse::shift_decimal;
+        assert_eq!(shift_decimal("1", 0).as_deref(), Some("1"));
+        assert_eq!(shift_decimal("0", 6).as_deref(), Some("0"));
+        assert_eq!(shift_decimal("-0.0", 3).as_deref(), Some("0"));
+        assert_eq!(shift_decimal("1.5e3", -1).as_deref(), Some("150"));
+        assert_eq!(shift_decimal("100", -3).as_deref(), Some("0.1"));
+        assert_eq!(shift_decimal("0.010", 1).as_deref(), Some("0.1"));
+        assert_eq!(shift_decimal("abc", 1), None);
+    }
+
+    #[test]
+    fn dimensions_and_scales() {
+        let v = UnitExpr::from(BaseUnit::Volt);
+        let a = UnitExpr::from(BaseUnit::Ampere);
+        let ohm = UnitExpr::from(BaseUnit::Ohm);
+        assert_eq!((v.clone() / a.clone()).dim(), ohm.dim());
+        assert_eq!((v.clone() * a).dim(), BaseUnit::Watt.dim());
+        assert_eq!(v.dim().unwrap().to_string(), "kg·m²·s⁻³·A⁻¹");
+
+        let slew = UnitExpr::from(Unit::new(Prefix::Milli, BaseUnit::Volt, 1))
+            / (Unit::new(Prefix::Micro, BaseUnit::Second, 1));
+        assert_eq!(slew.to_string(), "mV/μs");
+        assert_eq!(slew.exp10(), Some(3));
+        assert_eq!(slew.prefix_exp10(), 3);
+        assert!(approx_eq!(f64, slew.factor().unwrap(), 1e3, ulps = 2));
+        assert_eq!(slew.without_prefixes().to_string(), "V/s");
+        let squared = slew.clone().pow(2);
+        assert_eq!(squared.to_string(), "(mV/μs)^2");
+        assert_eq!(squared.exp10(), Some(6));
+
+        // V/A is Ω by dimension
+        let k_ohm = UnitExpr::from(Unit::new(Prefix::Kilo, BaseUnit::Ohm, 1));
+        let v_per_ma =
+            UnitExpr::from(BaseUnit::Volt) / (Unit::new(Prefix::Milli, BaseUnit::Ampere, 1));
+        assert!(approx_eq!(
+            f64,
+            v_per_ma.convert_f64(4.7, &k_ohm).unwrap(),
+            4.7,
+            ulps = 4
+        ));
+        assert_eq!(
+            k_ohm.convert_f64(1.0, &UnitExpr::from(BaseUnit::Volt)),
+            None
+        );
+
+        assert_eq!(UnitExpr::from(BaseUnit::Unknown("VDC".into())).dim(), None);
+        assert_eq!(Scale::Pow10(-3).factor(), 1e-3);
+        assert_eq!(Scale::Factor(0.5), Scale::Factor(0.5));
+    }
+
+    #[test]
+    fn registry() {
+        // UNIT-9
+        let mut units = Registry::new();
+        let rpm = NamedUnit {
+            name: "revolutions per minute".into(),
+            symbol: "Bd".into(),
+            dim: Dim::new(-1, 0, 0, 0, 0, 0, 0),
+            scale: Scale::Factor(std::f64::consts::TAU / 60.0),
+            aliases: vec!["baud".into()],
+        };
+        let base = units.register(rpm.clone()).unwrap();
+        assert_eq!(units.register(rpm.clone()).unwrap(), base);
+        units.alias("Vdc", Unit::base(BaseUnit::Volt)).unwrap();
+        units.alias("Ohms", Unit::base(BaseUnit::Ohm)).unwrap();
+        units
+            .alias("bn", Unit::new(Prefix::Nano, BaseUnit::Ratio, 1))
+            .unwrap();
+
+        let q = units.parse_quantity("2 kBd").unwrap();
+        assert_eq!(*unit_of(&q), Unit::new(Prefix::Kilo, base.clone(), 1));
+        assert_eq!(q.as_f64().unwrap(), 2000.0);
+        assert!(approx_eq!(
+            f64,
+            q.to_si_f64().unwrap(),
+            2000.0 * std::f64::consts::TAU / 60.0,
+            ulps = 2
+        ));
+        let q = units.parse_quantity("60 baud").unwrap();
+        assert_eq!(unit_of(&q).base, base);
+
+        let q = units.parse_quantity("12Vdc").unwrap();
+        assert_eq!(*unit_of(&q), Unit::base(BaseUnit::Volt));
+        let q = units.parse_quantity("3 bn").unwrap();
+        assert_eq!(q.as_f64().unwrap(), 3e-9);
+        assert!(units.parse_quantity("3 kbn").is_err());
+        let q = units.parse_quantity("12 kOhms").unwrap();
+        assert_eq!(*unit_of(&q), Unit::new(Prefix::Kilo, BaseUnit::Ohm, 1));
+        assert_eq!(units.parse_unit("kVdc").unwrap().to_string(), "kV");
+
+        // without the registry the words stay unknown
+        let q = Quantity::parse("12Vdc").unwrap();
+        assert_eq!(unit_of(&q).base, BaseUnit::Unknown("Vdc".into()));
+        assert!(q.to_si_f64().is_err());
+
+        // SI symbols and taken words can't be redefined
+        assert!(matches!(
+            units.alias("V", Unit::base(BaseUnit::Ohm)),
+            Err(Error::Registry(_))
+        ));
+        assert!(matches!(
+            units.alias("%", Unit::one()),
+            Err(Error::Registry(_))
+        ));
+        assert!(matches!(
+            units.alias("baud", Unit::base(BaseUnit::Hertz)),
+            Err(Error::Registry(_))
+        ));
     }
 
     #[test]

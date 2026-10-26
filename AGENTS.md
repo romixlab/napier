@@ -44,9 +44,15 @@ One crate.
 - `grammar/si.pest` — the pest grammar: units, prefixes, numbers, superscripts, the special resistance syntax.
   Prefix rules use look-ahead (`&("k" ~ ident)`) so `m` alone is meter and `mV` is milli-volt; the
   `*_unconditional` variants are for resistance (`4k7`).
-- `src/lib.rs` — `BaseUnit` (SI base and derived units plus `Named` for anything else), `Unit` (prefix, base,
-  exponent), `SIExp` (dimension vector), `Prefix`, `Quantity::parse`, `OhmF32::parse`, `SIExpr::parse` (stub),
-  tests at the bottom.
+- `src/dim.rs` — `Dim` (SI base-unit exponents, ww_si's order) and `Scale` (how a unit becomes coherent SI).
+- `src/unit.rs` — `Prefix`, `BaseUnit` (SI base and derived units, `Ratio`, registered `Named`, `Unknown` words),
+  `Unit` (prefix, base, exponent), `UnitExpr` (products, quotients, powers).
+- `src/registry.rs` — `Registry` and `NamedUnit`: units and spellings known at run time.
+- `src/parse.rs` — from the pest tree to `Quantity` and `UnitExpr`.
+- `src/lib.rs` — `Quantity`, `OhmF32::parse`, `Error`, tests at the bottom.
+
+The model follows ww_si (`~/git/wire_weaver/ww_stdlib/ww_si`): same `Dim` order and `Scale` semantics. Nothing about
+a non-SI unit is built in beyond `%`, `‰`, `ppm`; callers register theirs in a `Registry`.
 
 rvariant (`../rvariant/src/si.rs`) is the main consumer. After an API or behaviour change, build and test
 rvariant against this checkout (it takes si_dynamic by path) and say what it needs to follow.
