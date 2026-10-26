@@ -4,6 +4,10 @@
 //! a product, quotient or power of units; every unit has a [Dim] (SI base-unit exponents) and a [Scale] to coherent
 //! SI (the gram is 10⁻³ kg, °C is affine). Units beyond the SI set are registered at run time in a [Registry].
 
+#[doc = include_str!("../README.md")]
+#[cfg(doctest)]
+pub struct ReadmeDoctests;
+
 mod dim;
 mod parse;
 mod registry;

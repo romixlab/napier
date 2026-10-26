@@ -1,0 +1,231 @@
+{
+  "prefixes": [
+    "Unit",
+    "Kilo",
+    "Micro",
+    "Deca",
+    "Quecto"
+  ],
+  "units": [
+    {
+      "prefix": "Unit",
+      "base": "Volt",
+      "exp": 1
+    },
+    {
+      "prefix": "Kilo",
+      "base": "Ohm",
+      "exp": 1
+    },
+    {
+      "prefix": "Kilo",
+      "base": "Meter",
+      "exp": 2
+    },
+    {
+      "prefix": "Unit",
+      "base": "Second",
+      "exp": -1
+    },
+    {
+      "prefix": "Kilo",
+      "base": "Gram",
+      "exp": 1
+    },
+    {
+      "prefix": "Unit",
+      "base": "DegreeCelsius",
+      "exp": 1
+    },
+    {
+      "prefix": "Unit",
+      "base": "Ratio",
+      "exp": 1
+    },
+    {
+      "prefix": "Centi",
+      "base": "Ratio",
+      "exp": 1
+    },
+    {
+      "prefix": "Micro",
+      "base": "Ratio",
+      "exp": 1
+    },
+    {
+      "prefix": "Unit",
+      "base": {
+        "Named": {
+          "name": "revolutions per minute",
+          "symbol": "rpm",
+          "dim": {
+            "s": -1,
+            "m": 0,
+            "kg": 0,
+            "a": 0,
+            "k": 0,
+            "mol": 0,
+            "cd": 0
+          },
+          "scale": {
+            "Factor": 0.10471975511965977
+          }
+        }
+      },
+      "exp": 1
+    },
+    {
+      "prefix": "Unit",
+      "base": {
+        "Named": {
+          "name": "degree Fahrenheit",
+          "symbol": "°F",
+          "dim": {
+            "s": 0,
+            "m": 0,
+            "kg": 0,
+            "a": 0,
+            "k": 1,
+            "mol": 0,
+            "cd": 0
+          },
+          "scale": {
+            "Affine": {
+              "factor": 0.5555555555555556,
+              "offset": 255.37222222222223
+            }
+          }
+        }
+      },
+      "exp": 1
+    },
+    {
+      "prefix": "Unit",
+      "base": {
+        "Named": {
+          "name": "ångström",
+          "symbol": "Å",
+          "dim": {
+            "s": 0,
+            "m": 1,
+            "kg": 0,
+            "a": 0,
+            "k": 0,
+            "mol": 0,
+            "cd": 0
+          },
+          "scale": {
+            "Pow10": -10
+          }
+        }
+      },
+      "exp": 1
+    },
+    {
+      "prefix": "Kilo",
+      "base": {
+        "Named": {
+          "name": "baud",
+          "symbol": "Bd",
+          "dim": {
+            "s": -1,
+            "m": 0,
+            "kg": 0,
+            "a": 0,
+            "k": 0,
+            "mol": 0,
+            "cd": 0
+          },
+          "scale": "Coherent"
+        }
+      },
+      "exp": 1
+    },
+    {
+      "prefix": "Milli",
+      "base": {
+        "Unknown": "VDC"
+      },
+      "exp": 1
+    }
+  ],
+  "unit_exprs": [
+    {
+      "Unit": {
+        "prefix": "Micro",
+        "base": "Farad",
+        "exp": 1
+      }
+    },
+    {
+      "Div": [
+        {
+          "Unit": {
+            "prefix": "Micro",
+            "base": "Ratio",
+            "exp": 1
+          }
+        },
+        {
+          "Unit": {
+            "prefix": "Unit",
+            "base": "DegreeCelsius",
+            "exp": 1
+          }
+        }
+      ]
+    },
+    {
+      "Div": [
+        {
+          "Mul": [
+            {
+              "Unit": {
+                "prefix": "Kilo",
+                "base": "Gram",
+                "exp": 1
+              }
+            },
+            {
+              "Unit": {
+                "prefix": "Unit",
+                "base": "Meter",
+                "exp": 1
+              }
+            }
+          ]
+        },
+        {
+          "Unit": {
+            "prefix": "Unit",
+            "base": "Second",
+            "exp": 2
+          }
+        }
+      ]
+    },
+    {
+      "Pow": [
+        {
+          "Div": [
+            {
+              "Unit": {
+                "prefix": "Unit",
+                "base": "Meter",
+                "exp": 1
+              }
+            },
+            {
+              "Unit": {
+                "prefix": "Unit",
+                "base": "Second",
+                "exp": 1
+              }
+            }
+          ]
+        },
+        2
+      ]
+    }
+  ]
+}

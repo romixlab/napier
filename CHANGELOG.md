@@ -16,6 +16,8 @@ follow [Semantic Versioning](https://semver.org/). Feature IDs refer to [FEATURE
 - `Prefix::exp10`, `from_exp10`, `as_f64`; `Error::Registry`; `std::error::Error` for `Error`.
 - Unit expressions: `10 V/us`, `1 m/s²`, `ppm/°C`, `W/(m·K)`, `(m/s)^2` parse into `UnitExpr`; `·` (U+00B7)
   multiplies besides `*` and `⋅` (EXPR-1, EXPR-2).
+- Golden JSON for the serde shape of `Prefix`, `Unit` and `UnitExpr` (`tests/golden/units.json`); the README says
+  it changes only with a new major version (UNIT-5).
 - `Ω` as U+2126 and `℃` (U+2103) are read as `Ω` and `°C`; `m°C` is milli + °C (UNIT-13).
 
 ### Changed

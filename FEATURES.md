@@ -38,7 +38,9 @@ Last full review: 3 Oct 2026 (commit `b14b5aa`, 0.1.0). Built from the code and 
 - ✅ **UNIT-4 Unknown units**: any identifier the parser and the registry don't know parses as
   `BaseUnit::Unknown` (`10mVDC` → milli + `VDC`), with no dimension (`dim()` is `None`).
 - ✅ **UNIT-5 Serde**: `Unit`, `UnitExpr`, `BaseUnit`, `Prefix`, `Dim`, `Scale`, `Quantity`, `NamedUnit` derive
-  `Serialize` / `Deserialize`.
+  `Serialize` / `Deserialize`. The shape of `Prefix`, `Unit` and `UnitExpr` is pinned by golden JSON
+  (`tests/golden/units.json`, `tests/golden.rs`) and changes only with a new major version (README, *Serde
+  stability*).
 - ✅ **UNIT-6 Gram as the base of mass**: `BaseUnit::Gram` with `Scale::Pow10(-3)`, `10 kg` is kilo + gram
   (test `gram_is_the_base_of_mass`). Was: `g` mapped to `Kilogram`, `10 kg` became `kkg`.
 - ✅ **UNIT-7 Degree Celsius affine**: `°C` has `Scale::Affine { factor: 1, offset: 273.15 }`; `to_si_f64` and
