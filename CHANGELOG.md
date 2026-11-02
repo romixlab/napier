@@ -5,6 +5,17 @@ follow [Semantic Versioning](https://semver.org/). Feature IDs refer to [FEATURE
 
 ## [Unreleased]
 
+### Added
+
+- `napier`: an empty library crate for the expression language over si_dynamic's values (PRJ-4).
+
+### Changed
+
+- The repo is now a Cargo workspace; si_dynamic moved to `crates/si_dynamic` unchanged (same name, version and
+  features), its `repository` field now points at this repo (romixlab/napier, PRJ-4). A git dependency on
+  `si_dynamic` still resolves by package name, from anywhere in the repo; a path dependency on the old repo root
+  must point at `crates/si_dynamic` instead.
+
 ## [0.3.0] - 2026-10-26
 
 ### Added

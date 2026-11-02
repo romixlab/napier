@@ -1,0 +1,11 @@
+[package]
+name = "napier"
+version = "0.1.0"
+edition.workspace = true
+description = "Expression language over si_dynamic's values"
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+si_dynamic.workspace = true

@@ -39,24 +39,29 @@ The tpm repo's `/sync-repos` reads this file to log progress, so a missing entry
 
 ## Layout
 
-One crate.
+A Cargo workspace, two crates under `crates/`, root `Cargo.toml` holding `[workspace.package]` (shared edition,
+license, repository) and `[workspace.dependencies]`.
 
-- `grammar/si.pest` — the pest grammar: numbers, unit words, expressions (`m/s²`, `W/(m·K)`), superscripts, the
-  special resistance syntax (`4k7`, the `*_unconditional` prefixes). A unit word is resolved in Rust
-  (`parse::resolve_word`): a whole known unit wins (`Pa`, `cd`, `m`), then a prefix plus a known unit (`kPa`, `mΩ`),
-  then the old split for unknown words (`mVDC` is milli + `VDC`).
-- `src/dim.rs` — `Dim` (SI base-unit exponents, ww_si's order) and `Scale` (how a unit becomes coherent SI).
-- `src/unit.rs` — `Prefix`, `BaseUnit` (SI base and derived units, `Ratio`, registered `Named`, `Unknown` words),
-  `Unit` (prefix, base, exponent), `UnitExpr` (products, quotients, powers).
-- `src/registry.rs` — `Registry` and `NamedUnit`: units and spellings known at run time.
-- `src/parse.rs` — from the pest tree to `Quantity` and `UnitExpr`, word resolution and prefix splitting.
-- `src/lib.rs` — `Quantity`, `OhmF32::parse`, `Error`, tests at the bottom.
+- `crates/si_dynamic` — the values: parses SI quantities and units from text. Its own `README.md`,
+  `CHANGELOG.md`-worthy history lives in the root `CHANGELOG.md` below.
+  - `grammar/si.pest` — the pest grammar: numbers, unit words, expressions (`m/s²`, `W/(m·K)`), superscripts, the
+    special resistance syntax (`4k7`, the `*_unconditional` prefixes). A unit word is resolved in Rust
+    (`parse::resolve_word`): a whole known unit wins (`Pa`, `cd`, `m`), then a prefix plus a known unit (`kPa`,
+    `mΩ`), then the old split for unknown words (`mVDC` is milli + `VDC`).
+  - `src/dim.rs` — `Dim` (SI base-unit exponents, ww_si's order) and `Scale` (how a unit becomes coherent SI).
+  - `src/unit.rs` — `Prefix`, `BaseUnit` (SI base and derived units, `Ratio`, registered `Named`, `Unknown` words),
+    `Unit` (prefix, base, exponent), `UnitExpr` (products, quotients, powers).
+  - `src/registry.rs` — `Registry` and `NamedUnit`: units and spellings known at run time.
+  - `src/parse.rs` — from the pest tree to `Quantity` and `UnitExpr`, word resolution and prefix splitting.
+  - `src/lib.rs` — `Quantity`, `OhmF32::parse`, `Error`, tests at the bottom.
+- `crates/napier` — the expression language over si_dynamic's values, named after John Napier. Empty for now
+  (`publish = false`); depends on `si_dynamic` by path.
 
-The model follows ww_si (`~/git/wire_weaver/ww_stdlib/ww_si`): same `Dim` order and `Scale` semantics. Nothing about
-a non-SI unit is built in beyond `%`, `‰`, `ppm`; callers register theirs in a `Registry`.
+The si_dynamic model follows ww_si (`~/git/wire_weaver/ww_stdlib/ww_si`): same `Dim` order and `Scale` semantics.
+Nothing about a non-SI unit is built in beyond `%`, `‰`, `ppm`; callers register theirs in a `Registry`.
 
-rvariant (`../rvariant/src/si.rs`) is the main consumer. After an API or behaviour change, build and test
-rvariant against this checkout (it takes si_dynamic by path) and say what it needs to follow.
+rvariant (`../rvariant/src/si.rs`) is the main consumer of si_dynamic. After an API or behaviour change, build and
+test rvariant against this checkout (it takes si_dynamic by path) and say what it needs to follow.
 
 ## Commands
 
@@ -96,12 +101,12 @@ reaches clients (prod deploy, firmware/OTA release, registry publish) still wait
 ## Versions
 
 Landing bumps the version, not each work commit (tpm CLAUDE.md "Landing bumps the version"), so any build from main
-traces back to a release commit:
+traces back to a release commit. **A branch never touches a version** (a manifest's `version =`, a new
+`## [x.y.z]` CHANGELOG heading, a tag): not a session's call, in this workspace or any crate in it.
 - Session commits add CHANGELOG entries under `[Unreleased]` without bumping. `tpm land` turns them into the next
-  version's section with the manifest bump in one `release: x.y.z` commit: minor for Added/Changed/Removed/Deprecated,
-  else patch; major only when the owner says so (`tpm land --version`).
-- In a workspace, bump the changed crates by hand on the branch, then `tpm land --no-bump`. Docs-only, CI-only and
-  no-behaviour-change refactors land without a bump.
+  version's section with the manifest bump in one `release: x.y.z` commit, per changed crate: minor for
+  Added/Changed/Removed/Deprecated, else patch; major only when the owner says so (`tpm land --version`).
+  Docs-only, CI-only and no-behaviour-change refactors land without a bump.
 - CLIs print version, git SHA and build time in `--version`, e.g. `tool 0.4.2 (a1b2c3d-dirty, built 3 Oct 2026
   18:20)`: a small `build.rs` without extra crates (`git rev-parse --short HEAD`, `-dirty` when
   `git status --porcelain` isn't empty, `rerun-if-changed` on `.git/HEAD` and `.git/index`, `unknown` without

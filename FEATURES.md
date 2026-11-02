@@ -34,12 +34,13 @@ Last full review: 3 Oct 2026 (commit `b14b5aa`, 0.1.0). Built from the code and 
 - ✅ **UNIT-2 All SI prefixes**: quecto to quetta, `u` / `μ` / `µ` for micro, `k` / `K` for kilo, split off a word
   in `parse::resolve_word` (UNIT-12).
 - ✅ **UNIT-3 Unit exponents**: `m^2`, superscripts `m²`, `s⁻¹` (exponent fits in `i8`). Superscripts failed to
-  parse before 0.3 (`parse_superscript` in `src/parse.rs`).
+  parse before 0.3 (`parse_superscript` in `crates/si_dynamic/src/parse.rs`).
 - ✅ **UNIT-4 Unknown units**: any identifier the parser and the registry don't know parses as
   `BaseUnit::Unknown` (`10mVDC` → milli + `VDC`), with no dimension (`dim()` is `None`).
 - ✅ **UNIT-5 Serde**: `Unit`, `UnitExpr`, `BaseUnit`, `Prefix`, `Dim`, `Scale`, `Quantity`, `NamedUnit` derive
   `Serialize` / `Deserialize`. The shape of `Prefix`, `Unit` and `UnitExpr` is pinned by golden JSON
-  (`tests/golden/units.json`, `tests/golden.rs`) and changes only with a new major version (README, *Serde
+  (`crates/si_dynamic/tests/golden/units.json`, `crates/si_dynamic/tests/golden.rs`) and changes only with a new
+  major version (README, *Serde
   stability*).
 - ✅ **UNIT-6 Gram as the base of mass**: `BaseUnit::Gram` with `Scale::Pow10(-3)`, `10 kg` is kilo + gram
   (test `gram_is_the_base_of_mass`). Was: `g` mapped to `Kilogram`, `10 kg` became `kkg`.
@@ -51,10 +52,11 @@ Last full review: 3 Oct 2026 (commit `b14b5aa`, 0.1.0). Built from the code and 
 - ✅ **UNIT-9 Named units registered at run time**: `Registry::register(NamedUnit { name, symbol, dim, scale,
   aliases })` and `Registry::alias(word, Unit)` (`Vdc` = volt, `ppb` = nano + ratio); `Registry::parse_quantity` /
   `parse_unit`. SI symbols can't be redefined. A `BaseUnit::Named` value carries its dimension and scale, so stored
-  values convert without the registry (`src/registry.rs`, test `registry`).
+  values convert without the registry (`crates/si_dynamic/src/registry.rs`, test `registry`).
 - ✅ **UNIT-10 Unit model after ww_si**: `Dim` (s, m, kg, A, K, mol, cd, ww_si's order) in place of `SIExp`,
   `Scale::{Coherent, Pow10, Factor, Affine}`, `UnitExpr::{Unit, Mul, Div, Pow}` with `dim()`, `factor()`,
-  `offset()`, `exp10()`, `prefix_exp10()`, `without_prefixes()`, `convert_f64()` (`src/dim.rs`, `src/unit.rs`).
+  `offset()`, `exp10()`, `prefix_exp10()`, `without_prefixes()`, `convert_f64()` (`crates/si_dynamic/src/dim.rs`,
+  `crates/si_dynamic/src/unit.rs`).
 - ✅ **UNIT-11 Ratios**: `BaseUnit::Ratio` for dimensionless numbers; `%`, `‰`, `ppm` parse as centi, milli and
   micro + ratio and are written back that way (test `ratios`). A number without unit is a ratio.
 - ✅ **UNIT-12 Whole known units win over a prefix split**: `Pa`, `cd`, `mol`, `kat`, `Gy`, `ppm` and registered
@@ -104,8 +106,12 @@ Last full review: 3 Oct 2026 (commit `b14b5aa`, 0.1.0). Built from the code and 
 - ✅ **PRJ-1 Published on crates.io** (0.1.0).
 - 📋 **PRJ-2 README and docs**: crate-level docs with examples of accepted inputs; doc comments on the public
   types.
-- 📋 **PRJ-3 Tests**: 5 unit tests (`src/lib.rs`), `expr()` is all commented out. Add tests for every bug above
+- 📋 **PRJ-3 Tests**: 5 unit tests (`crates/si_dynamic/src/lib.rs`), `expr()` is all commented out. Add tests for
+  every bug above
   before fixing it, and a table test of accepted / rejected inputs.
+- ✅ **PRJ-4 Cargo workspace**: the repo is now a workspace (`Cargo.toml`, `[workspace.package]`,
+  `[workspace.dependencies]`); si_dynamic moved to `crates/si_dynamic` unchanged, `crates/napier` added as an
+  empty library crate for the expression language over si_dynamic's values.
 
 ## Dropped and superseded
 
