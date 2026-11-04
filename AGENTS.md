@@ -4,8 +4,8 @@ Guidance for AI agents and contributors. Read this before changing code.
 
 si_dynamic parses SI quantities and units from text at runtime: `4.7 uF`, `10mV`, `4k7` (resistance), units with
 prefixes and exponents, and (planned) unit expressions like `m/s²`. Published on crates.io. Its main user is
-rvariant (`Variant::SI`), and through it egui_tabular and mx3, where it parses component parameters typed by people
-or imported from CSV and supplier data, so lenient input and exact results both matter.
+rvariant (`Variant::SI`), and through it egui_tabular and an internal parts database, where it parses component
+parameters typed by people or imported from CSV and supplier data, so lenient input and exact results both matter.
 
 ## FEATURES.md is the source of truth
 
@@ -35,7 +35,7 @@ IDs per area (`UNIT-2`, `NUM-3`, ...).
 - Questions like "what's new" or "what changed since X" are answered from CHANGELOG.md, newest sections first
   (the user's version or date as the cutoff), with FEATURES.md for current status.
 
-The tpm repo's `/sync-repos` reads this file to log progress, so a missing entry means work nobody sees.
+Internal tooling reads this file to log progress, so a missing entry means work nobody sees.
 
 ## Layout
 
@@ -93,20 +93,19 @@ fix starts with a failing test with the exact input that misbehaves.
 Conventional Commits: `feat: ...`, `fix: ...`, `refactor: ...`, `build: ...`. Short imperative summary, blank
 line, body with what and why; reference feature IDs (`fix: gram prefix no longer doubles to kkg (UNIT-6)`).
 
-Commit on your own initiative (tpm CLAUDE.md "Commits are free, prod is gated"): work happens on a session branch
-(`tpm work new SLUG`), each finished step is one commit with FEATURES.md and CHANGELOG.md updated in it. When the
-work is done and the user agrees, `tpm land` puts it on main; pushing is the housekeeping timer's job. Anything that
-reaches clients (prod deploy, firmware/OTA release, registry publish) still waits for the user's OK.
+Commit on your own initiative: work happens on a session branch, each finished step is one commit with
+FEATURES.md and CHANGELOG.md updated in it. When the work is done and the user agrees, it lands on main. Anything
+that reaches clients (prod deploy, firmware/OTA release, registry publish) still waits for the user's OK.
 
 ## Versions
 
-Landing bumps the version, not each work commit (tpm CLAUDE.md "Landing bumps the version"), so any build from main
-traces back to a release commit. **A branch never touches a version** (a manifest's `version =`, a new
-`## [x.y.z]` CHANGELOG heading, a tag): not a session's call, in this workspace or any crate in it.
-- Session commits add CHANGELOG entries under `[Unreleased]` without bumping. `tpm land` turns them into the next
+Landing bumps the version, not each work commit, so any build from main traces back to a release commit. **A
+branch never touches a version** (a manifest's `version =`, a new `## [x.y.z]` CHANGELOG heading, a tag): not a
+session's call, in this workspace or any crate in it.
+- Session commits add CHANGELOG entries under `[Unreleased]` without bumping. Landing turns them into the next
   version's section with the manifest bump in one `release: x.y.z` commit, per changed crate: minor for
-  Added/Changed/Removed/Deprecated, else patch; major only when the owner says so (`tpm land --version`).
-  Docs-only, CI-only and no-behaviour-change refactors land without a bump.
+  Added/Changed/Removed/Deprecated, else patch; major only when the owner says so. Docs-only, CI-only and
+  no-behaviour-change refactors land without a bump.
 - CLIs print version, git SHA and build time in `--version`, e.g. `tool 0.4.2 (a1b2c3d-dirty, built 3 Oct 2026
   18:20)`: a small `build.rs` without extra crates (`git rev-parse --short HEAD`, `-dirty` when
   `git status --porcelain` isn't empty, `rerun-if-changed` on `.git/HEAD` and `.git/index`, `unknown` without

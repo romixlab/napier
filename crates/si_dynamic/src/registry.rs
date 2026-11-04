@@ -1,5 +1,5 @@
 //! Units known at run time (UNIT-9): named units with their dimension and scale, and other spellings of units.
-//! Nothing about a particular non-SI unit is built in; a caller (mx3 from its database, a test bench from its
+//! Nothing about a particular non-SI unit is built in; a caller (a parts database, a test bench from its
 //! config) registers what it needs and parses through its [Registry].
 
 use crate::dim::{Dim, Scale};

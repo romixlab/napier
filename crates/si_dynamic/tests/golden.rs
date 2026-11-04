@@ -1,4 +1,4 @@
-//! The serde shape of [Prefix], [Unit] and [UnitExpr] is stored data (rvariant values in mx3's database): it may only
+//! The serde shape of [Prefix], [Unit] and [UnitExpr] is stored data (rvariant values in a parts database): it may only
 //! change on purpose, with a new major version. `UPDATE_GOLDEN=1 cargo test --test golden` rewrites the file after
 //! such a change.
 

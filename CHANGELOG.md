@@ -11,6 +11,7 @@ follow [Semantic Versioning](https://semver.org/). Feature IDs refer to [FEATURE
 
 ### Changed
 
+- docs: internal references removed.
 - The repo is now a Cargo workspace; si_dynamic moved to `crates/si_dynamic` unchanged (same name, version and
   features), its `repository` field now points at this repo (romixlab/napier, PRJ-4). A git dependency on
   `si_dynamic` still resolves by package name, from anywhere in the repo; a path dependency on the old repo root
